@@ -282,6 +282,13 @@ type PprofConfig struct {
 	Addr string `yaml:"addr" json:"addr"`
 }
 
+const (
+	// RemoteManagementPanelModeBuiltin serves the embedded management panel.
+	RemoteManagementPanelModeBuiltin = "builtin"
+	// RemoteManagementPanelModeRemote keeps the legacy GitHub release backed panel.
+	RemoteManagementPanelModeRemote = "remote"
+)
+
 // RemoteManagement holds management API configuration under 'remote-management'.
 type RemoteManagement struct {
 	// AllowRemote toggles remote (non-localhost) access to management API.
@@ -293,6 +300,8 @@ type RemoteManagement struct {
 	// DisableAutoUpdatePanel disables automatic periodic background updates of the management panel asset from GitHub.
 	// When false (the default), the background updater remains enabled; when true, the panel is only downloaded on first access if missing.
 	DisableAutoUpdatePanel bool `yaml:"disable-auto-update-panel"`
+	// PanelMode selects the management UI source. Supported values: "builtin" (default) and "remote".
+	PanelMode string `yaml:"panel-mode"`
 	// PanelGitHubRepository overrides the GitHub repository used to fetch the management panel asset.
 	// Accepts either a repository URL (https://github.com/org/repo) or an API releases endpoint.
 	PanelGitHubRepository string `yaml:"panel-github-repository"`
@@ -741,6 +750,7 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.Pprof.Enable = false
 	cfg.Pprof.Addr = DefaultPprofAddr
 	cfg.AmpCode.RestrictManagementToLocalhost = false // Default to false: API key auth is sufficient
+	cfg.RemoteManagement.PanelMode = RemoteManagementPanelModeBuiltin
 	cfg.RemoteManagement.PanelGitHubRepository = DefaultPanelGitHubRepository
 	if err = yaml.Unmarshal(data, &cfg); err != nil {
 		if optional {
@@ -785,6 +795,10 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.RemoteManagement.PanelGitHubRepository = strings.TrimSpace(cfg.RemoteManagement.PanelGitHubRepository)
 	if cfg.RemoteManagement.PanelGitHubRepository == "" {
 		cfg.RemoteManagement.PanelGitHubRepository = DefaultPanelGitHubRepository
+	}
+	cfg.RemoteManagement.PanelMode = strings.ToLower(strings.TrimSpace(cfg.RemoteManagement.PanelMode))
+	if cfg.RemoteManagement.PanelMode == "" {
+		cfg.RemoteManagement.PanelMode = RemoteManagementPanelModeBuiltin
 	}
 
 	cfg.Pprof.Addr = strings.TrimSpace(cfg.Pprof.Addr)

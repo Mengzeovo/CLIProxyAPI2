@@ -29,6 +29,7 @@ func ParseConfigBytes(data []byte) (*Config, error) {
 	cfg.Pprof.Enable = false
 	cfg.Pprof.Addr = DefaultPprofAddr
 	cfg.AmpCode.RestrictManagementToLocalhost = false // Default to false: API key auth is sufficient
+	cfg.RemoteManagement.PanelMode = RemoteManagementPanelModeBuiltin
 	cfg.RemoteManagement.PanelGitHubRepository = DefaultPanelGitHubRepository
 
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
@@ -47,6 +48,10 @@ func ParseConfigBytes(data []byte) (*Config, error) {
 	cfg.RemoteManagement.PanelGitHubRepository = strings.TrimSpace(cfg.RemoteManagement.PanelGitHubRepository)
 	if cfg.RemoteManagement.PanelGitHubRepository == "" {
 		cfg.RemoteManagement.PanelGitHubRepository = DefaultPanelGitHubRepository
+	}
+	cfg.RemoteManagement.PanelMode = strings.ToLower(strings.TrimSpace(cfg.RemoteManagement.PanelMode))
+	if cfg.RemoteManagement.PanelMode == "" {
+		cfg.RemoteManagement.PanelMode = RemoteManagementPanelModeBuiltin
 	}
 
 	cfg.Pprof.Addr = strings.TrimSpace(cfg.Pprof.Addr)

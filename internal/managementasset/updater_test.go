@@ -38,14 +38,27 @@ func TestAutoUpdateSkipReason(t *testing.T) {
 		{
 			name: "auto update disabled",
 			cfg: &config.Config{
-				RemoteManagement: config.RemoteManagement{DisableAutoUpdatePanel: true},
+				RemoteManagement: config.RemoteManagement{
+					PanelMode:              config.RemoteManagementPanelModeRemote,
+					DisableAutoUpdatePanel: true,
+				},
 			},
 			wantReason: "disable-auto-update-panel is enabled",
 			wantSkip:   true,
 		},
 		{
-			name:       "enabled",
-			cfg:        &config.Config{},
+			name: "builtin panel mode",
+			cfg: &config.Config{
+				RemoteManagement: config.RemoteManagement{PanelMode: config.RemoteManagementPanelModeBuiltin},
+			},
+			wantReason: "panel-mode is not remote",
+			wantSkip:   true,
+		},
+		{
+			name: "remote panel mode",
+			cfg: &config.Config{
+				RemoteManagement: config.RemoteManagement{PanelMode: config.RemoteManagementPanelModeRemote},
+			},
 			wantReason: "",
 			wantSkip:   false,
 		},

@@ -865,6 +865,24 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
+
+	staticOverride := managementasset.HasStaticOverride()
+	remotePanel := strings.EqualFold(strings.TrimSpace(cfg.RemoteManagement.PanelMode), config.RemoteManagementPanelModeRemote)
+	if staticOverride || remotePanel {
+		s.serveManagementControlPanelFile(c, cfg, remotePanel && !staticOverride)
+		return
+	}
+
+	data := managementasset.BuiltinHTML()
+	if len(data) == 0 {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Data(http.StatusOK, "text/html; charset=utf-8", data)
+}
+
+func (s *Server) serveManagementControlPanelFile(c *gin.Context, cfg *config.Config, allowEnsure bool) {
 	filePath := managementasset.FilePath(s.configFilePath)
 	if strings.TrimSpace(filePath) == "" {
 		c.AbortWithStatus(http.StatusNotFound)
@@ -873,6 +891,10 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 
 	if _, err := os.Stat(filePath); err != nil {
 		if os.IsNotExist(err) {
+			if !allowEnsure {
+				c.AbortWithStatus(http.StatusNotFound)
+				return
+			}
 			// Synchronously ensure management.html is available with a detached context.
 			// Control panel bootstrap should not be canceled by client disconnects.
 			if !managementasset.EnsureLatestManagementHTML(context.Background(), managementasset.StaticDir(s.configFilePath), cfg.ProxyURL, cfg.RemoteManagement.PanelGitHubRepository) {

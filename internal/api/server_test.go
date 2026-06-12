@@ -204,6 +204,94 @@ func TestManagementPluginsRouteRegistered(t *testing.T) {
 	}
 }
 
+func TestManagementControlPanelServesBuiltinByDefault(t *testing.T) {
+	server := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/management.html", nil)
+	rr := httptest.NewRecorder()
+	server.engine.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if body := rr.Body.String(); !strings.Contains(body, "CLIProxyAPI Management") {
+		t.Fatalf("builtin panel body missing marker: %s", body)
+	}
+}
+
+func TestManagementControlPanelServesStaticOverride(t *testing.T) {
+	staticDir := t.TempDir()
+	panelPath := filepath.Join(staticDir, "management.html")
+	if err := os.WriteFile(panelPath, []byte("<html>static override panel</html>"), 0o644); err != nil {
+		t.Fatalf("write panel override: %v", err)
+	}
+	t.Setenv("MANAGEMENT_STATIC_PATH", staticDir)
+
+	server := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/management.html", nil)
+	rr := httptest.NewRecorder()
+	server.engine.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if body := rr.Body.String(); !strings.Contains(body, "static override panel") {
+		t.Fatalf("static override body missing marker: %s", body)
+	}
+}
+
+func TestManagementControlPanelMissingStaticOverrideReturnsNotFound(t *testing.T) {
+	staticDir := t.TempDir()
+	t.Setenv("MANAGEMENT_STATIC_PATH", staticDir)
+
+	server := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/management.html", nil)
+	rr := httptest.NewRecorder()
+	server.engine.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d body=%s", rr.Code, http.StatusNotFound, rr.Body.String())
+	}
+}
+
+func TestManagementControlPanelRemoteModeServesLocalAsset(t *testing.T) {
+	staticDir := t.TempDir()
+	panelPath := filepath.Join(staticDir, "management.html")
+	if err := os.WriteFile(panelPath, []byte("<html>remote asset panel</html>"), 0o644); err != nil {
+		t.Fatalf("write panel asset: %v", err)
+	}
+	t.Setenv("MANAGEMENT_STATIC_PATH", staticDir)
+
+	server := newTestServer(t)
+	server.cfg.RemoteManagement.PanelMode = proxyconfig.RemoteManagementPanelModeRemote
+
+	req := httptest.NewRequest(http.MethodGet, "/management.html", nil)
+	rr := httptest.NewRecorder()
+	server.engine.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if body := rr.Body.String(); !strings.Contains(body, "remote asset panel") {
+		t.Fatalf("remote asset body missing marker: %s", body)
+	}
+}
+
+func TestManagementControlPanelDisabledReturnsNotFound(t *testing.T) {
+	server := newTestServer(t)
+	server.cfg.RemoteManagement.DisableControlPanel = true
+
+	req := httptest.NewRequest(http.MethodGet, "/management.html", nil)
+	rr := httptest.NewRecorder()
+	server.engine.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d body=%s", rr.Code, http.StatusNotFound, rr.Body.String())
+	}
+}
+
 func TestHomeEnabledHidesManagementEndpointsAndControlPanel(t *testing.T) {
 	t.Setenv("MANAGEMENT_PASSWORD", "test-management-key")
 
