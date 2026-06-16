@@ -25,7 +25,7 @@ export type RecentRequestBucket = {
   Success?: number;
   Failed?: number;
   timestamp?: number;
-  time?: number;
+  time?: number | string;
 };
 
 export type AuthFile = {
@@ -61,6 +61,19 @@ export type AuthFile = {
 
 export type AuthFilesResponse = {
   files: AuthFile[];
+};
+
+export type ApiKeyUsageEntry = {
+  success?: number;
+  failed?: number;
+  recent_requests?: RecentRequestBucket[];
+};
+
+// provider -> "base_url|api_key" -> usage entry
+export type ApiKeyUsageResponse = Record<string, Record<string, ApiKeyUsageEntry>>;
+
+export type ApiKeysResponse = {
+  'api-keys'?: string[];
 };
 
 export type ModelAlias = {

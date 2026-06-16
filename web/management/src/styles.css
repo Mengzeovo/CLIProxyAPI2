@@ -1042,3 +1042,152 @@ tbody tr:last-child td {
     grid-column: auto;
   }
 }
+
+/* Provider matrix with recent success/failed columns */
+.matrix-usage .matrix-head,
+.matrix-usage .matrix-row {
+  grid-template-columns: 1.4fr 0.6fr 0.7fr 0.8fr 0.8fr 0.8fr 0.7fr;
+}
+
+.matrix-row .pos {
+  color: var(--green);
+  font-weight: 700;
+}
+
+.matrix-row .neg {
+  color: var(--red);
+  font-weight: 700;
+}
+
+/* Call-volume trend bar chart */
+.usage-trend {
+  margin-top: 12px;
+}
+
+.usage-trend-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 120px;
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.usage-trend-col {
+  flex: 1 1 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  min-width: 0;
+}
+
+.usage-trend-stack {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  border-radius: 3px 3px 0 0;
+  overflow: hidden;
+  min-height: 2px;
+  background: var(--surface-soft);
+}
+
+.usage-bar {
+  display: block;
+  width: 100%;
+}
+
+.usage-bar.ok {
+  background: var(--green);
+}
+
+.usage-bar.fail {
+  background: var(--red);
+}
+
+.usage-trend-legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.usage-trend-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.usage-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.usage-dot.ok {
+  background: var(--green);
+}
+
+.usage-dot.fail {
+  background: var(--red);
+}
+
+.drawer-trend {
+  display: grid;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.drawer-trend-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+/* Client API key management */
+.search-box.grow {
+  flex: 1 1 100%;
+}
+
+.apikey-list {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.apikey-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+}
+
+.apikey-row + .apikey-row {
+  border-top: 1px solid var(--border);
+}
+
+.apikey-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.apikey-input {
+  flex: 1 1 auto;
+  min-height: 34px;
+  font-family: var(--mono, monospace);
+}
+
+.form-success {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--green);
+  background: var(--green-soft);
+  color: var(--green);
+  border-radius: 7px;
+}

@@ -4,10 +4,13 @@ import {
   CheckCircle2,
   ChevronRight,
   Code2,
+  Copy,
   Download,
   Eye,
+  EyeOff,
   FileText,
   FileUp,
+  Hash,
   KeyRound,
   Languages,
   Loader2,
@@ -21,6 +24,7 @@ import {
   Server,
   Settings,
   Shield,
+  Sparkles,
   Sun,
   Trash2,
   Unlock,
@@ -42,6 +46,7 @@ import {
 } from './api';
 import type {
   ApiCallResponse,
+  ApiKeysResponse,
   AppConfig,
   AuthFile,
   AuthFilesResponse,
@@ -51,9 +56,10 @@ import type {
   OpenAICompatibilityConfig,
   ProviderApiKeyConfig,
   ProviderApiKeyResponse,
+  RecentRequestBucket,
   RequestErrorLog,
 } from './types';
-import { buildLineDiff, bytes, formatDate, maskSecret, providerOf, recentTotals, statusOf, successRate } from './utils';
+import { buildLineDiff, bytes, formatDate, generateApiKey, maskSecret, mergeBuckets, providerOf, recentTotals, statusOf, successRate } from './utils';
 import {
   getInitialLanguage,
   languageOptions,
@@ -74,11 +80,12 @@ const queryClient = new QueryClient({
   },
 });
 
-type View = 'overview' | 'accounts' | 'config' | 'logs' | 'playground';
+type View = 'overview' | 'accounts' | 'apikeys' | 'config' | 'logs' | 'playground';
 
 const navItems: Array<{ id: View; labelKey: TranslationKey; icon: typeof Activity }> = [
   { id: 'overview', labelKey: 'navOverview', icon: Activity },
   { id: 'accounts', labelKey: 'accounts', icon: KeyRound },
+  { id: 'apikeys', labelKey: 'navApiKeys', icon: Hash },
   { id: 'config', labelKey: 'config', icon: Settings },
   { id: 'logs', labelKey: 'logs', icon: FileText },
   { id: 'playground', labelKey: 'navApiTest', icon: Play },
@@ -306,11 +313,6 @@ function ConsoleShell({ onLock }: { onLock: () => void }) {
     queryFn: () => managementApi.get<AuthFilesResponse>('/auth-files'),
     refetchInterval: 20000,
   });
-  const usageQueue = useQuery({
-    queryKey: ['usage-queue'],
-    queryFn: () => managementApi.get<unknown[]>('/usage-queue?count=20'),
-    refetchInterval: 15000,
-  });
 
   const accounts = authFiles.data?.files || [];
   const activeView = navItems.find((item) => item.id === view);
@@ -372,9 +374,10 @@ function ConsoleShell({ onLock }: { onLock: () => void }) {
 
         <section className="content">
           {view === 'overview' ? (
-            <Overview config={config.data} accounts={accounts} usageRecords={usageQueue.data || []} loading={config.isLoading || authFiles.isLoading} />
+            <Overview config={config.data} accounts={accounts} loading={config.isLoading || authFiles.isLoading} />
           ) : null}
           {view === 'accounts' ? <Accounts accounts={accounts} loading={authFiles.isLoading} onSelect={setSelectedAuth} /> : null}
+          {view === 'apikeys' ? <ApiKeys /> : null}
           {view === 'config' ? <ConfigPage config={config.data} /> : null}
           {view === 'logs' ? <LogsPage config={config.data} /> : null}
           {view === 'playground' ? <Playground accounts={accounts} /> : null}
@@ -395,7 +398,7 @@ function StatusPill({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
-function Overview({ config, accounts, usageRecords, loading }: { config?: AppConfig; accounts: AuthFile[]; usageRecords: unknown[]; loading: boolean }) {
+function Overview({ config, accounts, loading }: { config?: AppConfig; accounts: AuthFile[]; loading: boolean }) {
   const { t } = useI18n();
   const byProvider = useMemo(() => {
     const groups = new Map<string, AuthFile[]>();
@@ -409,14 +412,44 @@ function Overview({ config, accounts, usageRecords, loading }: { config?: AppCon
   const enabled = accounts.filter((auth) => !auth.disabled).length;
   const unavailable = accounts.filter((auth) => auth.unavailable || statusOf(auth) === 'failed').length;
 
+  const totals = useMemo(
+    () =>
+      accounts.reduce<{ success: number; failed: number }>(
+        (acc, auth) => {
+          const recent = recentTotals(auth.recent_requests);
+          acc.success += Number(auth.success ?? 0) + recent.success;
+          acc.failed += Number(auth.failed ?? 0) + recent.failed;
+          return acc;
+        },
+        { success: 0, failed: 0 },
+      ),
+    [accounts],
+  );
+  const overallRate = successRate(accounts);
+
+  const trendBuckets = useMemo(
+    () => mergeBuckets(accounts.map((auth) => auth.recent_requests)),
+    [accounts],
+  );
+
   return (
     <div className="page-grid">
       <div className="metric-row">
         <Metric icon={Server} label={t('service')} value={loading ? t('loading') : t('online')} tone="green" />
         <Metric icon={KeyRound} label={t('accounts')} value={`${enabled}/${accounts.length}`} detail={t('enabledTotal')} tone="blue" />
-        <Metric icon={AlertTriangle} label={t('unavailable')} value={String(unavailable)} tone={unavailable > 0 ? 'red' : 'green'} />
-        <Metric icon={Activity} label={t('recentRecords')} value={String(usageRecords.length)} tone="amber" />
+        <Metric icon={CheckCircle2} label={t('totalSuccess')} value={String(totals.success)} detail={`${overallRate}% ${t('success')}`} tone="green" />
+        <Metric icon={AlertTriangle} label={t('totalFailed')} value={String(totals.failed)} tone={totals.failed > 0 ? 'red' : 'green'} />
       </div>
+
+      <section className="panel wide">
+        <div className="panel-heading">
+          <div>
+            <h2>{t('usageTrend')}</h2>
+            <p>{t('usageTrendHelp')}</p>
+          </div>
+        </div>
+        <UsageTrend buckets={trendBuckets} emptyLabel={t('noAccountsFound')} />
+      </section>
 
       <section className="panel wide">
         <div className="panel-heading">
@@ -425,24 +458,37 @@ function Overview({ config, accounts, usageRecords, loading }: { config?: AppCon
             <p>{t('providerHealthMatrixHelp')}</p>
           </div>
         </div>
-        <div className="matrix">
+        <div className="matrix matrix-usage">
           <div className="matrix-head">
             <span>{t('provider')}</span>
             <span>{t('total')}</span>
             <span>{t('enabled')}</span>
             <span>{t('unavailable')}</span>
+            <span>{t('recentSuccess')}</span>
+            <span>{t('recentFailed')}</span>
             <span>{t('success')}</span>
           </div>
           {byProvider.length === 0 ? <EmptyState icon={KeyRound} title={t('noAccountsFound')} /> : null}
           {byProvider.map(([provider, providerAccounts]) => {
             const disabled = providerAccounts.filter((auth) => auth.disabled).length;
             const failed = providerAccounts.filter((auth) => auth.unavailable || statusOf(auth) === 'failed').length;
+            const recent = providerAccounts.reduce<{ success: number; failed: number }>(
+              (acc, auth) => {
+                const r = recentTotals(auth.recent_requests);
+                acc.success += r.success;
+                acc.failed += r.failed;
+                return acc;
+              },
+              { success: 0, failed: 0 },
+            );
             return (
               <div className="matrix-row" key={provider}>
                 <span className="mono">{provider}</span>
                 <span>{providerAccounts.length}</span>
                 <span>{providerAccounts.length - disabled}</span>
                 <span>{failed}</span>
+                <span className="pos">{recent.success}</span>
+                <span className="neg">{recent.failed}</span>
                 <span>{successRate(providerAccounts)}%</span>
               </div>
             );
@@ -470,6 +516,41 @@ function Overview({ config, accounts, usageRecords, loading }: { config?: AppCon
           <KV label={t('controlPanel')} value={config?.['remote-management']?.['disable-control-panel'] ? t('disabled') : t('enabled')} />
         </div>
       </section>
+    </div>
+  );
+}
+
+function UsageTrend({ buckets, emptyLabel }: { buckets: Array<{ label: string; success: number; failed: number }>; emptyLabel: string }) {
+  const { t } = useI18n();
+  const max = buckets.reduce((acc, bucket) => Math.max(acc, bucket.success + bucket.failed), 0);
+  const hasData = buckets.some((bucket) => bucket.success + bucket.failed > 0);
+
+  if (buckets.length === 0 || !hasData) {
+    return <EmptyState icon={Activity} title={emptyLabel} />;
+  }
+
+  return (
+    <div className="usage-trend">
+      <div className="usage-trend-bars">
+        {buckets.map((bucket, index) => {
+          const total = bucket.success + bucket.failed;
+          const heightPct = max > 0 ? Math.round((total / max) * 100) : 0;
+          const successPct = total > 0 ? Math.round((bucket.success / total) * 100) : 0;
+          const title = `${bucket.label || ''} · ${t('success')} ${bucket.success} / ${t('failed')} ${bucket.failed}`;
+          return (
+            <div className="usage-trend-col" key={index} title={title}>
+              <div className="usage-trend-stack" style={{ height: `${heightPct}%` }}>
+                <i className="usage-bar fail" style={{ height: `${100 - successPct}%` }} />
+                <i className="usage-bar ok" style={{ height: `${successPct}%` }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="usage-trend-legend">
+        <span><i className="usage-dot ok" />{t('success')}</span>
+        <span><i className="usage-dot fail" />{t('failed')}</span>
+      </div>
     </div>
   );
 }
@@ -1276,6 +1357,227 @@ function Playground({ accounts }: { accounts: AuthFile[] }) {
   );
 }
 
+function ApiKeyRow({
+  value,
+  onUpdate,
+  onDelete,
+  busy,
+}: {
+  value: string;
+  onUpdate: (next: string) => void;
+  onDelete: () => void;
+  busy: boolean;
+}) {
+  const { t } = useI18n();
+  const [revealed, setRevealed] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  const copy = useCallback(() => {
+    void navigator.clipboard?.writeText(value).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, [value]);
+
+  return (
+    <div className="apikey-row">
+      {editing ? (
+        <input className="apikey-input" value={draft} autoFocus spellCheck={false} onChange={(event) => setDraft(event.target.value)} />
+      ) : (
+        <span className="mono apikey-value">{revealed ? value : maskSecret(value)}</span>
+      )}
+      <div className="row-actions">
+        {editing ? (
+          <>
+            <button
+              className="icon-button small"
+              title={t('save')}
+              disabled={busy || !draft.trim() || draft.trim() === value}
+              onClick={() => {
+                onUpdate(draft.trim());
+                setEditing(false);
+              }}
+            >
+              <Save size={15} />
+            </button>
+            <button
+              className="icon-button small"
+              title={t('close')}
+              onClick={() => {
+                setDraft(value);
+                setEditing(false);
+              }}
+            >
+              <X size={15} />
+            </button>
+          </>
+        ) : (
+          <>
+            <button className="icon-button small" title={revealed ? t('hide') : t('show')} onClick={() => setRevealed((prev) => !prev)}>
+              {revealed ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
+            <button className="icon-button small" title={copied ? t('copied') : t('copy')} onClick={copy}>
+              {copied ? <CheckCircle2 size={15} /> : <Copy size={15} />}
+            </button>
+            <button className="icon-button small" title={t('edit')} disabled={busy} onClick={() => setEditing(true)}>
+              <Settings size={15} />
+            </button>
+            <button
+              className="icon-button small danger"
+              title={t('delete')}
+              disabled={busy}
+              onClick={() => {
+                if (confirm(t('apiKeyDeleteConfirm'))) onDelete();
+              }}
+            >
+              <Trash2 size={15} />
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ApiKeys() {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  const [newKey, setNewKey] = useState('');
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const query = useQuery({
+    queryKey: ['api-keys'],
+    queryFn: () => managementApi.get<ApiKeysResponse>('/api-keys'),
+  });
+  const keys = useMemo(() => query.data?.['api-keys'] || [], [query.data]);
+
+  const save = useMutation({
+    mutationFn: (next: string[]) => managementApi.put('/api-keys', { 'api-keys': next }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['api-keys'] }),
+  });
+
+  const addKey = useCallback(() => {
+    const trimmed = newKey.trim();
+    setError('');
+    setNotice('');
+    if (!trimmed) {
+      setError(t('apiKeyValueRequired'));
+      return;
+    }
+    if (keys.includes(trimmed)) {
+      setError(t('apiKeyDuplicate'));
+      return;
+    }
+    save.mutate([...keys, trimmed], {
+      onSuccess: () => {
+        setNewKey('');
+        setNotice(t('apiKeyAdded'));
+      },
+    });
+  }, [keys, newKey, save, t]);
+
+  const generateKey = useCallback(() => {
+    setError('');
+    setNotice('');
+    let candidate = generateApiKey();
+    while (keys.includes(candidate)) {
+      candidate = generateApiKey();
+    }
+    setNewKey(candidate);
+    void navigator.clipboard?.writeText(candidate).then(
+      () => setNotice(t('apiKeyGeneratedCopied')),
+      () => setNotice(t('apiKeyGenerated')),
+    );
+  }, [keys, t]);
+
+  const updateKey = useCallback(
+    (index: number, next: string) => {
+      setError('');
+      setNotice('');
+      if (keys.includes(next) && keys[index] !== next) {
+        setError(t('apiKeyDuplicate'));
+        return;
+      }
+      const updated = keys.map((key, i) => (i === index ? next : key));
+      save.mutate(updated, { onSuccess: () => setNotice(t('apiKeyUpdated')) });
+    },
+    [keys, save, t],
+  );
+
+  const deleteKey = useCallback(
+    (index: number) => {
+      setError('');
+      setNotice('');
+      const updated = keys.filter((_, i) => i !== index);
+      save.mutate(updated, { onSuccess: () => setNotice(t('apiKeyDeleted')) });
+    },
+    [keys, save, t],
+  );
+
+  return (
+    <section className="panel full">
+      <div className="panel-heading">
+        <div>
+          <h2>{t('clientApiKeys')}</h2>
+          <p>{t('clientApiKeysHelp')}</p>
+        </div>
+      </div>
+
+      <div className="toolbar">
+        <div className="search-box grow">
+          <KeyRound size={16} />
+          <input
+            value={newKey}
+            spellCheck={false}
+            placeholder={t('apiKeyValue')}
+            onChange={(event) => setNewKey(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') addKey();
+            }}
+          />
+        </div>
+        <button className="ghost" type="button" onClick={generateKey}>
+          <Sparkles size={15} />
+          {t('generateApiKey')}
+        </button>
+        <button className="primary" disabled={save.isPending} onClick={addKey}>
+          {save.isPending ? <Loader2 className="spin" size={15} /> : <Plus size={15} />}
+          {t('addClientApiKey')}
+        </button>
+      </div>
+
+      {error ? <div className="form-error">{error}</div> : null}
+      {notice ? <div className="form-success">{notice}</div> : null}
+      {save.error ? <ApiErrorBox error={save.error} /> : null}
+
+      {query.isLoading ? (
+        <EmptyState icon={Loader2} title={t('loading')} spin />
+      ) : keys.length === 0 ? (
+        <EmptyState icon={KeyRound} title={t('noApiKeys')} />
+      ) : (
+        <div className="apikey-list">
+          {keys.map((key, index) => (
+            <ApiKeyRow
+              key={`${key}-${index}`}
+              value={key}
+              busy={save.isPending}
+              onUpdate={(next) => updateKey(index, next)}
+              onDelete={() => deleteKey(index)}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function AccountDrawer({ auth, onClose }: { auth: AuthFile | null; onClose: () => void }) {
   const { t } = useI18n();
   const status = auth ? statusOf(auth) : '';
@@ -1303,6 +1605,10 @@ function AccountDrawer({ auth, onClose }: { auth: AuthFile | null; onClose: () =
           <KV label={t('lastRefresh')} value={formatDate(auth.last_refresh)} />
           <KV label={t('success')} value={String(auth.success ?? 0)} />
           <KV label={t('failed')} value={String(auth.failed ?? 0)} />
+          <div className="drawer-trend">
+            <span className="drawer-trend-title">{t('usageTrend')}</span>
+            <UsageTrend buckets={mergeBuckets([auth.recent_requests])} emptyLabel={t('noRequestSent')} />
+          </div>
           <pre>{JSON.stringify(auth.id_token || {}, null, 2)}</pre>
         </div>
       ) : null}

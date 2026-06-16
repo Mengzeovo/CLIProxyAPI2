@@ -169,4 +169,50 @@ describe('App', () => {
     expect(await screen.findByText('Headers JSON must be a JSON object')).toBeTruthy();
     expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/v0/management/gemini-api-key'))).toBe(false);
   });
+
+  it('lists and adds client API keys', async () => {
+    const fetchMock = renderUnlocked(
+      vi.fn((url: string, init?: RequestInit) => {
+        if (url.endsWith('/healthz')) return Promise.resolve(jsonResponse({ status: 'ok' }));
+        if (url.endsWith('/v0/management/config')) return Promise.resolve(jsonResponse({}));
+        if (url.endsWith('/v0/management/auth-files')) return Promise.resolve(jsonResponse({ files: [] }));
+        if (url.endsWith('/v0/management/api-keys') && init?.method === 'PUT') return Promise.resolve(jsonResponse({ status: 'ok' }));
+        if (url.endsWith('/v0/management/api-keys')) return Promise.resolve(jsonResponse({ 'api-keys': ['existing-key'] }));
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'API Keys' }));
+    expect(await screen.findByText(/exis/)).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText('API key value'), { target: { value: 'fresh-key' } });
+    fireEvent.click(screen.getByRole('button', { name: /Add API key/ }));
+
+    await waitFor(() => {
+      const putCall = fetchMock.mock.calls.find(([url, init]) => String(url).endsWith('/v0/management/api-keys') && init?.method === 'PUT');
+      expect(putCall).toBeTruthy();
+      expect(JSON.parse(String(putCall?.[1]?.body))).toEqual({ 'api-keys': ['existing-key', 'fresh-key'] });
+    });
+  });
+
+  it('rejects duplicate client API keys without calling the API', async () => {
+    const fetchMock = renderUnlocked(
+      vi.fn((url: string) => {
+        if (url.endsWith('/healthz')) return Promise.resolve(jsonResponse({ status: 'ok' }));
+        if (url.endsWith('/v0/management/config')) return Promise.resolve(jsonResponse({}));
+        if (url.endsWith('/v0/management/auth-files')) return Promise.resolve(jsonResponse({ files: [] }));
+        if (url.endsWith('/v0/management/api-keys')) return Promise.resolve(jsonResponse({ 'api-keys': ['dup-key'] }));
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'API Keys' }));
+    await screen.findByText('du••••');
+
+    fireEvent.change(screen.getByPlaceholderText('API key value'), { target: { value: 'dup-key' } });
+    fireEvent.click(screen.getByRole('button', { name: /Add API key/ }));
+
+    expect(await screen.findByText('This API key already exists')).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith('/v0/management/api-keys') && init?.method === 'PUT')).toBe(false);
+  });
 });
