@@ -37,6 +37,9 @@ type VertexCompatKey struct {
 
 	// ExcludedModels lists model IDs that should be excluded for this provider.
 	ExcludedModels []string `yaml:"excluded-models,omitempty" json:"excluded-models,omitempty"`
+
+	// Group optionally assigns this credential to a routing group (provider-type "vertex").
+	Group string `yaml:"group,omitempty" json:"group,omitempty"`
 }
 
 func (k VertexCompatKey) GetAPIKey() string  { return k.APIKey }

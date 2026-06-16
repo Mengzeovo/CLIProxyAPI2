@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -117,4 +118,42 @@ func addConfigHeadersToAttrs(headers map[string]string, attrs map[string]string)
 		}
 		attrs["header:"+key] = val
 	}
+}
+
+// setGroupAttr records the routing group an auth belongs to under the shared
+// group attribute key. The value is normalized to match the form used by group
+// validation and selection-time filtering. Empty groups are ignored so
+// ungrouped credentials carry no group attribute at all.
+func setGroupAttr(attrs map[string]string, group string) {
+	if attrs == nil {
+		return
+	}
+	if normalized := config.NormalizeGroupName(group); normalized != "" {
+		attrs[coreauth.GroupAttributeKey] = normalized
+	}
+}
+
+// resolveOAuthGroup looks up the routing group for an OAuth file-backed auth from
+// the oauth-groups config mapping. The mapping may key on the auth ID (relative
+// path under auth-dir), the full path, or the bare file name, so all three are
+// tried. It returns "" when no mapping matches.
+func resolveOAuthGroup(cfg *config.Config, authID, fullPath string) string {
+	if cfg == nil || len(cfg.OAuthGroups) == 0 {
+		return ""
+	}
+	candidates := []string{
+		authID,
+		fullPath,
+		filepath.Base(fullPath),
+	}
+	for _, key := range candidates {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if group, ok := cfg.OAuthGroups[key]; ok {
+			return group
+		}
+	}
+	return ""
 }

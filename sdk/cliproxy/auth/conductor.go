@@ -3513,6 +3513,7 @@ func (m *Manager) pickNextLegacy(ctx context.Context, provider, model string, op
 
 	pinnedAuthID := pinnedAuthIDFromMetadata(opts.Metadata)
 	disallowFreeAuth := disallowFreeAuthFromMetadata(opts.Metadata)
+	allowedGroups, groupRestricted := m.allowedGroupsForContext(ctx)
 
 	m.mu.RLock()
 	selector := m.selector
@@ -3537,6 +3538,9 @@ func (m *Manager) pickNextLegacy(ctx context.Context, provider, model string, op
 			continue
 		}
 		if pinnedAuthID != "" && candidate.ID != pinnedAuthID {
+			continue
+		}
+		if !authAllowedForGroups(candidate, allowedGroups, groupRestricted) {
 			continue
 		}
 		if disallowFreeAuth && isFreeCodexAuth(candidate) {
@@ -3591,6 +3595,13 @@ func (m *Manager) pickNext(ctx context.Context, provider, model string, opts cli
 	if m.HomeEnabled() {
 		auth, exec, _, err := m.pickNextViaHome(ctx, model, opts, tried)
 		return auth, exec, err
+	}
+
+	// Group-restricted callers route through the legacy path, whose candidate
+	// slice filter applies group eligibility before selection. The fast-path
+	// scheduler buckets are not group-aware.
+	if _, restricted := m.allowedGroupsForContext(ctx); restricted {
+		return m.pickNextLegacy(ctx, provider, model, opts, tried)
 	}
 
 	if m.hasPluginScheduler() || !m.useSchedulerFastPath() {
@@ -3656,6 +3667,7 @@ func (m *Manager) pickNextMixedLegacy(ctx context.Context, providers []string, m
 
 	pinnedAuthID := pinnedAuthIDFromMetadata(opts.Metadata)
 	disallowFreeAuth := disallowFreeAuthFromMetadata(opts.Metadata)
+	allowedGroups, groupRestricted := m.allowedGroupsForContext(ctx)
 
 	providerSet := make(map[string]struct{}, len(providers))
 	for _, provider := range providers {
@@ -3687,6 +3699,9 @@ func (m *Manager) pickNextMixedLegacy(ctx context.Context, providers []string, m
 			continue
 		}
 		if pinnedAuthID != "" && candidate.ID != pinnedAuthID {
+			continue
+		}
+		if !authAllowedForGroups(candidate, allowedGroups, groupRestricted) {
 			continue
 		}
 		if disallowFreeAuth && isFreeCodexAuth(candidate) {
@@ -3755,6 +3770,12 @@ func (m *Manager) pickNextMixedLegacy(ctx context.Context, providers []string, m
 func (m *Manager) pickNextMixed(ctx context.Context, providers []string, model string, opts cliproxyexecutor.Options, tried map[string]struct{}) (*Auth, ProviderExecutor, string, error) {
 	if m.HomeEnabled() {
 		return m.pickNextViaHome(ctx, model, opts, tried)
+	}
+
+	// Group-restricted callers route through the legacy path so the candidate
+	// slice filter can apply group eligibility before selection.
+	if _, restricted := m.allowedGroupsForContext(ctx); restricted {
+		return m.pickNextMixedLegacy(ctx, providers, model, opts, tried)
 	}
 
 	if m.hasPluginScheduler() || !m.useSchedulerFastPath() {

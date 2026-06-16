@@ -182,6 +182,11 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) []
 	}
 	coreauth.ApplyCustomHeadersFromMetadata(a)
 	ApplyAuthExcludedModelsMeta(a, cfg, perAccountExcluded, "oauth")
+	// Resolve the routing group for this OAuth account from the oauth-groups
+	// mapping. OAuth accounts keep group membership in config rather than in the
+	// token file, so it is looked up by auth ID or file name here. Setting it
+	// before virtual-auth synthesis lets gemini virtual children inherit it.
+	setGroupAttr(a.Attributes, resolveOAuthGroup(cfg, id, fullPath))
 	// For codex auth files, extract plan_type from the JWT id_token.
 	if provider == "codex" {
 		if idTokenRaw, ok := metadata["id_token"].(string); ok && strings.TrimSpace(idTokenRaw) != "" {

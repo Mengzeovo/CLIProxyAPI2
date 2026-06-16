@@ -60,6 +60,7 @@ func (s *ConfigSynthesizer) synthesizeGeminiKeys(ctx *SynthesisContext) []*corea
 			"source":  fmt.Sprintf("config:gemini[%s]", token),
 			"api_key": key,
 		}
+		setGroupAttr(attrs, entry.Group)
 		metadata := map[string]any{}
 		if entry.DisableCooling {
 			metadata["disable_cooling"] = true
@@ -115,6 +116,7 @@ func (s *ConfigSynthesizer) synthesizeClaudeKeys(ctx *SynthesisContext) []*corea
 			"source":  fmt.Sprintf("config:claude[%s]", token),
 			"api_key": key,
 		}
+		setGroupAttr(attrs, ck.Group)
 		metadata := map[string]any{}
 		if ck.DisableCooling {
 			metadata["disable_cooling"] = true
@@ -170,6 +172,7 @@ func (s *ConfigSynthesizer) synthesizeCodexKeys(ctx *SynthesisContext) []*coreau
 			"source":  fmt.Sprintf("config:codex[%s]", token),
 			"api_key": key,
 		}
+		setGroupAttr(attrs, ck.Group)
 		metadata := map[string]any{}
 		if ck.DisableCooling {
 			metadata["disable_cooling"] = true
@@ -243,6 +246,7 @@ func (s *ConfigSynthesizer) synthesizeOpenAICompat(ctx *SynthesisContext) []*cor
 				"compat_name":  compat.Name,
 				"provider_key": providerName,
 			}
+			setGroupAttr(attrs, compat.Group)
 			metadata := map[string]any{}
 			if disableCooling {
 				metadata["disable_cooling"] = true
@@ -285,6 +289,7 @@ func (s *ConfigSynthesizer) synthesizeOpenAICompat(ctx *SynthesisContext) []*cor
 				"compat_name":  compat.Name,
 				"provider_key": providerName,
 			}
+			setGroupAttr(attrs, compat.Group)
 			metadata := map[string]any{}
 			if disableCooling {
 				metadata["disable_cooling"] = true
@@ -338,6 +343,7 @@ func (s *ConfigSynthesizer) synthesizeVertexCompat(ctx *SynthesisContext) []*cor
 			"base_url":     base,
 			"provider_key": providerName,
 		}
+		setGroupAttr(attrs, compat.Group)
 		if compat.Priority != 0 {
 			attrs["priority"] = strconv.Itoa(compat.Priority)
 		}

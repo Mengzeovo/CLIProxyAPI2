@@ -152,6 +152,22 @@ type Config struct {
 	// Payload defines default and override rules for provider payload parameters.
 	Payload PayloadConfig `yaml:"payload" json:"payload"`
 
+	// Groups defines routing groups. Each group is homogeneous (single provider type)
+	// so upstream credentials within it are interchangeable for load balancing and the
+	// group's available models can be probed coherently. See internal/config/groups.go.
+	Groups []Group `yaml:"groups,omitempty" json:"groups,omitempty"`
+
+	// OAuthGroups maps OAuth/file-backed auth identifiers (auth file name or ID) to a
+	// group name. OAuth accounts are kept out of their token files, so their group
+	// membership is declared centrally here.
+	OAuthGroups map[string]string `yaml:"oauth-groups,omitempty" json:"oauth-groups,omitempty"`
+
+	// APIKeyGroups maps a downstream client API key (from top-level api-keys) to the
+	// groups it may reach. A key may be bound to multiple groups; the models it can use
+	// are the union across those groups. Keys absent from this map are unrestricted
+	// (legacy behavior: all upstreams allowed).
+	APIKeyGroups map[string][]string `yaml:"api-key-groups,omitempty" json:"api-key-groups,omitempty"`
+
 	legacyMigrationPending bool `yaml:"-" json:"-"`
 }
 
@@ -521,6 +537,10 @@ type ClaudeKey struct {
 	// Claude /v1/messages requests. It is disabled by default so upstream seed
 	// changes do not alter the proxy's legacy behavior.
 	ExperimentalCCHSigning bool `yaml:"experimental-cch-signing,omitempty" json:"experimental-cch-signing,omitempty"`
+
+	// Group optionally assigns this credential to a routing group (see Config.Groups).
+	// The group's provider-type must be "claude".
+	Group string `yaml:"group,omitempty" json:"group,omitempty"`
 }
 
 func (k ClaudeKey) GetAPIKey() string  { return k.APIKey }
@@ -572,6 +592,9 @@ type CodexKey struct {
 
 	// DisableCooling disables auth/model cooldown scheduling for this credential when true.
 	DisableCooling bool `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
+
+	// Group optionally assigns this credential to a routing group (provider-type "codex").
+	Group string `yaml:"group,omitempty" json:"group,omitempty"`
 }
 
 func (k CodexKey) GetAPIKey() string  { return k.APIKey }
@@ -619,6 +642,9 @@ type GeminiKey struct {
 
 	// DisableCooling disables auth/model cooldown scheduling for this credential when true.
 	DisableCooling bool `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
+
+	// Group optionally assigns this credential to a routing group (provider-type "gemini").
+	Group string `yaml:"group,omitempty" json:"group,omitempty"`
 }
 
 func (k GeminiKey) GetAPIKey() string  { return k.APIKey }
@@ -666,6 +692,10 @@ type OpenAICompatibility struct {
 
 	// DisableCooling disables auth/model cooldown scheduling for this provider when true.
 	DisableCooling bool `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
+
+	// Group optionally assigns this provider to a routing group (provider-type
+	// "openai-compatibility"). Multiple openai-compatibility providers may share a group.
+	Group string `yaml:"group,omitempty" json:"group,omitempty"`
 }
 
 // OpenAICompatibilityAPIKey represents an API key configuration with optional proxy setting.
@@ -856,6 +886,18 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 
 	// Validate raw payload rules and drop invalid entries.
 	cfg.SanitizePayloadRules()
+
+	// Normalize routing groups and their references. Group definitions must be valid
+	// (unique names, known provider types) or loading fails; reference checks ensure
+	// credentials/API keys only point at groups that exist with a matching provider type.
+	if err = cfg.SanitizeGroups(); err != nil {
+		return nil, fmt.Errorf("invalid groups configuration: %w", err)
+	}
+	cfg.SanitizeOAuthGroups()
+	cfg.SanitizeAPIKeyGroups()
+	if err = cfg.ValidateGroupReferences(); err != nil {
+		return nil, fmt.Errorf("invalid group reference: %w", err)
+	}
 
 	// NOTE: Legacy migration persistence is intentionally disabled together with
 	// startup legacy migration to keep startup read-only for config.yaml.
