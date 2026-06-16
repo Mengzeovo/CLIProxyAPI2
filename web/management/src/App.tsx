@@ -7,12 +7,14 @@ import {
   Download,
   Eye,
   FileText,
+  FileUp,
   KeyRound,
   Languages,
   Loader2,
   Lock,
   Moon,
   Play,
+  Plus,
   RefreshCcw,
   Save,
   Search,
@@ -33,11 +35,24 @@ import {
   getHealth,
   getManagementKey,
   apiDownload,
+  apiUpload,
   managementApi,
   setManagementKey,
   clearManagementKey,
 } from './api';
-import type { ApiCallResponse, AppConfig, AuthFile, AuthFilesResponse, LogsResponse, RequestErrorLog } from './types';
+import type {
+  ApiCallResponse,
+  AppConfig,
+  AuthFile,
+  AuthFilesResponse,
+  AuthUploadResponse,
+  LogsResponse,
+  ModelAlias,
+  OpenAICompatibilityConfig,
+  ProviderApiKeyConfig,
+  ProviderApiKeyResponse,
+  RequestErrorLog,
+} from './types';
 import { buildLineDiff, bytes, formatDate, maskSecret, providerOf, recentTotals, statusOf, successRate } from './utils';
 import {
   getInitialLanguage,
@@ -70,6 +85,62 @@ const navItems: Array<{ id: View; labelKey: TranslationKey; icon: typeof Activit
 ];
 
 type TFunction = (key: TranslationKey, params?: Record<string, string | number>) => string;
+
+type CredentialTab = 'oauth' | 'upload' | 'api-key';
+type UploadMode = 'auth-json' | 'vertex';
+type ApiKeyProvider = 'gemini' | 'claude' | 'codex' | 'openai-compatibility' | 'vertex';
+
+const apiKeyEndpointByProvider: Record<ApiKeyProvider, string> = {
+  gemini: '/gemini-api-key',
+  claude: '/claude-api-key',
+  codex: '/codex-api-key',
+  'openai-compatibility': '/openai-compatibility',
+  vertex: '/vertex-api-key',
+};
+
+const apiKeyResponseKeyByProvider: Record<ApiKeyProvider, keyof ProviderApiKeyResponse> = {
+  gemini: 'gemini-api-key',
+  claude: 'claude-api-key',
+  codex: 'codex-api-key',
+  'openai-compatibility': 'openai-compatibility',
+  vertex: 'vertex-api-key',
+};
+
+const apiKeyProviderLabels: Array<{ value: ApiKeyProvider; label: string }> = [
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'claude', label: 'Claude' },
+  { value: 'codex', label: 'Codex' },
+  { value: 'openai-compatibility', label: 'OpenAI-compatible' },
+  { value: 'vertex', label: 'Vertex-compatible' },
+];
+
+type ApiKeyFormState = {
+  provider: ApiKeyProvider;
+  name: string;
+  apiKey: string;
+  baseUrl: string;
+  prefix: string;
+  proxyUrl: string;
+  priority: string;
+  headersJson: string;
+  modelsJson: string;
+  excludedModelsJson: string;
+  websockets: boolean;
+};
+
+const defaultApiKeyForm: ApiKeyFormState = {
+  provider: 'gemini',
+  name: '',
+  apiKey: '',
+  baseUrl: '',
+  prefix: '',
+  proxyUrl: '',
+  priority: '',
+  headersJson: '',
+  modelsJson: '',
+  excludedModelsJson: '',
+  websockets: false,
+};
 
 type I18nContextValue = {
   language: Language;
@@ -427,6 +498,7 @@ function Accounts({ accounts, loading, onSelect }: { accounts: AuthFile[]; loadi
   const { t } = useI18n();
   const [globalFilter, setGlobalFilter] = useState('');
   const [providerFilter, setProviderFilter] = useState('all');
+  const [addCredentialOpen, setAddCredentialOpen] = useState(false);
   const qc = useQueryClient();
   const providers = useMemo(() => ['all', ...Array.from(new Set(accounts.map(providerOf))).sort()], [accounts]);
 
@@ -551,6 +623,10 @@ function Accounts({ accounts, loading, onSelect }: { accounts: AuthFile[]; loadi
             </option>
           ))}
         </select>
+        <button className="primary" onClick={() => setAddCredentialOpen(true)}>
+          <Plus size={15} />
+          {t('addCredential')}
+        </button>
       </div>
       <div className="table-wrap">
         <table>
@@ -588,12 +664,12 @@ function Accounts({ accounts, loading, onSelect }: { accounts: AuthFile[]; loadi
           </tbody>
         </table>
       </div>
-      <OAuthActions />
+      <AddCredentialModal open={addCredentialOpen} onClose={() => setAddCredentialOpen(false)} />
     </section>
   );
 }
 
-function OAuthActions() {
+function OAuthActions({ onRequested }: { onRequested?: () => void }) {
   const providers = [
     ['anthropic', 'Claude'],
     ['codex', 'Codex'],
@@ -604,7 +680,10 @@ function OAuthActions() {
   ];
   const requestAuth = async (provider: string) => {
     const data = await managementApi.get<{ url?: string }>(`/${provider}-auth-url?is_webui=true`);
-    if (data.url) window.open(data.url, '_blank', 'noopener,noreferrer');
+    if (data.url) {
+      window.open(data.url, '_blank', 'noopener,noreferrer');
+      onRequested?.();
+    }
   };
   return (
     <div className="oauth-row">
@@ -616,6 +695,345 @@ function OAuthActions() {
       ))}
     </div>
   );
+}
+
+function AddCredentialModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { t } = useI18n();
+  const [tab, setTab] = useState<CredentialTab>('oauth');
+  const qc = useQueryClient();
+
+  const refreshCredentialQueries = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: ['auth-files'] });
+    void qc.invalidateQueries({ queryKey: ['config'] });
+    void qc.invalidateQueries({ queryKey: ['config-yaml'] });
+  }, [qc]);
+
+  if (!open) return null;
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal" role="dialog" aria-modal="true" aria-labelledby="add-credential-title">
+        <div className="modal-head">
+          <div>
+            <h2 id="add-credential-title">{t('addCredential')}</h2>
+            <p>{t('addCredentialHelp')}</p>
+          </div>
+          <button className="icon-button" title={t('close')} onClick={onClose}>
+            <X size={17} />
+          </button>
+        </div>
+        <div className="segmented" role="tablist" aria-label={t('credentialType')}>
+          {[
+            ['oauth', t('oauthLogin')],
+            ['upload', t('uploadFile')],
+            ['api-key', t('apiKey')],
+          ].map(([id, label]) => (
+            <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id as CredentialTab)} type="button">
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="modal-body">
+          {tab === 'oauth' ? (
+            <CredentialSection title={t('oauthLogin')}>
+              <OAuthActions
+                onRequested={() => {
+                  refreshCredentialQueries();
+                  onClose();
+                }}
+              />
+            </CredentialSection>
+          ) : null}
+          {tab === 'upload' ? <UploadCredentialPanel onSuccess={refreshCredentialQueries} /> : null}
+          {tab === 'api-key' ? <ApiKeyCredentialPanel onSuccess={refreshCredentialQueries} /> : null}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function CredentialSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="credential-section">
+      <h3>{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function UploadCredentialPanel({ onSuccess }: { onSuccess: () => void }) {
+  const { t } = useI18n();
+  const [mode, setMode] = useState<UploadMode>('auth-json');
+  const [authFiles, setAuthFiles] = useState<File[]>([]);
+  const [vertexFile, setVertexFile] = useState<File | null>(null);
+  const [vertexLocation, setVertexLocation] = useState('us-central1');
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [fileInputResetKey, setFileInputResetKey] = useState(0);
+
+  const uploadMutation = useMutation({
+    mutationFn: async () => {
+      setError('');
+      setSuccess('');
+      if (mode === 'auth-json') {
+        if (authFiles.length === 0) throw new Error(t('noFileSelected'));
+        if (authFiles.some((file) => !file.name.toLowerCase().endsWith('.json'))) throw new Error(t('onlyJsonFiles'));
+        const formData = new FormData();
+        for (const file of authFiles) {
+          formData.append('file', file);
+        }
+        return apiUpload<AuthUploadResponse>('/v0/management/auth-files', formData);
+      }
+      if (!vertexFile) throw new Error(t('noFileSelected'));
+      if (!vertexFile.name.toLowerCase().endsWith('.json')) throw new Error(t('onlyJsonFiles'));
+      const formData = new FormData();
+      formData.append('file', vertexFile);
+      formData.append('location', vertexLocation.trim() || 'us-central1');
+      return apiUpload<AuthUploadResponse>('/v0/management/vertex/import', formData);
+    },
+    onSuccess: () => {
+      setSuccess(mode === 'auth-json' ? t('uploadSuccess') : t('vertexUploadSuccess'));
+      setAuthFiles([]);
+      setVertexFile(null);
+      setFileInputResetKey((value) => value + 1);
+      onSuccess();
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : t('apiRequestFailed')),
+  });
+
+  return (
+    <CredentialSection title={t('uploadFile')}>
+      <div className="segmented compact" role="tablist" aria-label={t('uploadFile')}>
+        <button type="button" className={mode === 'auth-json' ? 'active' : ''} onClick={() => setMode('auth-json')}>
+          {t('uploadAuthJson')}
+        </button>
+        <button type="button" className={mode === 'vertex' ? 'active' : ''} onClick={() => setMode('vertex')}>
+          {t('vertexServiceAccount')}
+        </button>
+      </div>
+      {mode === 'auth-json' ? (
+        <div className="form-grid">
+          <label className="span-2">
+            {t('authJsonFiles')}
+            <input
+              key={`auth-json-${fileInputResetKey}`}
+              type="file"
+              accept=".json,application/json"
+              multiple
+              onChange={(event) => setAuthFiles(Array.from(event.target.files || []))}
+            />
+          </label>
+          <p className="field-help span-2">{t('authJsonUploadHelp')}</p>
+        </div>
+      ) : (
+        <div className="form-grid">
+          <label className="span-2">
+            {t('vertexServiceAccount')}
+            <input
+              key={`vertex-${fileInputResetKey}`}
+              type="file"
+              accept=".json,application/json"
+              onChange={(event) => setVertexFile(event.target.files?.[0] || null)}
+            />
+          </label>
+          <label>
+            {t('vertexLocation')}
+            <input value={vertexLocation} onChange={(event) => setVertexLocation(event.target.value)} />
+          </label>
+        </div>
+      )}
+      {error ? <div className="form-error">{error}</div> : null}
+      {success ? <div className="success-box">{success}</div> : null}
+      <button className="primary" onClick={() => uploadMutation.mutate()} disabled={uploadMutation.isPending}>
+        {uploadMutation.isPending ? <Loader2 className="spin" size={15} /> : <FileUp size={15} />}
+        {mode === 'auth-json' ? t('upload') : t('importVertex')}
+      </button>
+    </CredentialSection>
+  );
+}
+
+function ApiKeyCredentialPanel({ onSuccess }: { onSuccess: () => void }) {
+  const { t } = useI18n();
+  const [form, setForm] = useState<ApiKeyFormState>(defaultApiKeyForm);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const updateForm = <K extends keyof ApiKeyFormState>(key: K, value: ApiKeyFormState[K]) => {
+    setForm((current) => ({ ...current, [key]: value }));
+  };
+
+  const saveMutation = useMutation({
+    mutationFn: async () => saveApiKeyCredential(form, t),
+    onSuccess: () => {
+      setSuccess(t('apiKeySaved'));
+      setError('');
+      setForm(defaultApiKeyForm);
+      onSuccess();
+    },
+    onError: (err) => {
+      setSuccess('');
+      setError(err instanceof Error ? err.message : t('apiRequestFailed'));
+    },
+  });
+
+  const isOpenAICompat = form.provider === 'openai-compatibility';
+
+  return (
+    <CredentialSection title={t('addApiKey')}>
+      <div className="form-grid">
+        <label>
+          {t('apiKeyProvider')}
+          <select value={form.provider} onChange={(event) => updateForm('provider', event.target.value as ApiKeyProvider)}>
+            {apiKeyProviderLabels.map((provider) => (
+              <option key={provider.value} value={provider.value}>
+                {provider.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {isOpenAICompat ? (
+          <label>
+            {t('name')}
+            <input value={form.name} onChange={(event) => updateForm('name', event.target.value)} />
+          </label>
+        ) : null}
+        <label className={isOpenAICompat ? '' : 'span-2'}>
+          {t('apiKey')}
+          <input type="password" value={form.apiKey} onChange={(event) => updateForm('apiKey', event.target.value)} />
+        </label>
+        <label>
+          Base URL
+          <input value={form.baseUrl} onChange={(event) => updateForm('baseUrl', event.target.value)} />
+        </label>
+        <label>
+          Prefix
+          <input value={form.prefix} onChange={(event) => updateForm('prefix', event.target.value)} />
+        </label>
+        <label>
+          {t('proxyUrl')}
+          <input value={form.proxyUrl} onChange={(event) => updateForm('proxyUrl', event.target.value)} />
+        </label>
+        <label>
+          {t('priority')}
+          <input type="number" value={form.priority} onChange={(event) => updateForm('priority', event.target.value)} />
+        </label>
+        {form.provider === 'codex' ? (
+          <label className="checkbox-row span-2">
+            <input type="checkbox" checked={form.websockets} onChange={(event) => updateForm('websockets', event.target.checked)} />
+            {t('codexWebsockets')}
+          </label>
+        ) : null}
+        <label className="span-2">
+          {t('headersJson')}
+          <textarea value={form.headersJson} onChange={(event) => updateForm('headersJson', event.target.value)} spellCheck={false} />
+        </label>
+        <label className="span-2">
+          {t('modelsJson')}
+          <textarea value={form.modelsJson} onChange={(event) => updateForm('modelsJson', event.target.value)} spellCheck={false} />
+        </label>
+        <label className="span-2">
+          {t('excludedModelsJson')}
+          <textarea value={form.excludedModelsJson} onChange={(event) => updateForm('excludedModelsJson', event.target.value)} spellCheck={false} />
+        </label>
+      </div>
+      {error ? <div className="form-error">{error}</div> : null}
+      {success ? <div className="success-box">{success}</div> : null}
+      <button className="primary" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+        {saveMutation.isPending ? <Loader2 className="spin" size={15} /> : <Save size={15} />}
+        {t('addApiKey')}
+      </button>
+    </CredentialSection>
+  );
+}
+
+async function saveApiKeyCredential(form: ApiKeyFormState, t: TFunction): Promise<void> {
+  const provider = form.provider;
+  const endpoint = apiKeyEndpointByProvider[provider];
+  const responseKey = apiKeyResponseKeyByProvider[provider];
+  const apiKey = form.apiKey.trim();
+  const baseUrl = form.baseUrl.trim();
+  const providerName = form.name.trim();
+
+  if (provider === 'openai-compatibility') {
+    if (!providerName) throw new Error(t('providerNameRequired'));
+    if (!baseUrl) throw new Error(t('baseUrlRequired'));
+  } else if (!apiKey) {
+    throw new Error(t('apiKeyRequired'));
+  }
+  if (provider === 'codex' && !baseUrl) {
+    throw new Error(t('baseUrlRequired'));
+  }
+
+  const priority = parseOptionalInteger(form.priority);
+  const headers = parseOptionalJSONObject(form.headersJson, t('headersJson'), t);
+  const models = parseOptionalJSONArray<ModelAlias>(form.modelsJson, t('modelsJson'), t);
+  const excludedModels = parseOptionalJSONArray<string>(form.excludedModelsJson, 'excluded-models', t);
+
+  const current = await managementApi.get<ProviderApiKeyResponse>(endpoint);
+  const currentList = (current[responseKey] || []) as Array<ProviderApiKeyConfig | OpenAICompatibilityConfig>;
+
+  if (provider === 'openai-compatibility') {
+    const entry: OpenAICompatibilityConfig = {
+      name: providerName,
+      'base-url': baseUrl,
+    };
+    if (priority !== undefined) entry.priority = priority;
+    if (form.prefix.trim()) entry.prefix = form.prefix.trim();
+    if (apiKey) entry['api-key-entries'] = [{ 'api-key': apiKey, ...(form.proxyUrl.trim() ? { 'proxy-url': form.proxyUrl.trim() } : {}) }];
+    if (models) entry.models = models;
+    if (headers) entry.headers = headers;
+    await managementApi.put(endpoint, [...(currentList as OpenAICompatibilityConfig[]), entry]);
+    return;
+  }
+
+  const entry: ProviderApiKeyConfig = {
+    'api-key': apiKey,
+  };
+  if (priority !== undefined) entry.priority = priority;
+  if (form.prefix.trim()) entry.prefix = form.prefix.trim();
+  if (baseUrl) entry['base-url'] = baseUrl;
+  if (form.proxyUrl.trim()) entry['proxy-url'] = form.proxyUrl.trim();
+  if (models) entry.models = models;
+  if (headers) entry.headers = headers;
+  if (excludedModels) entry['excluded-models'] = excludedModels;
+  if (provider === 'codex' && form.websockets) entry.websockets = true;
+
+  await managementApi.put(endpoint, [...(currentList as ProviderApiKeyConfig[]), entry]);
+}
+
+function parseOptionalInteger(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function parseOptionalJSON(value: string, field: string, t: TFunction): unknown {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    throw new Error(t('invalidJsonValue', { field }));
+  }
+}
+
+function parseOptionalJSONObject(value: string, field: string, t: TFunction): Record<string, string> | undefined {
+  const parsed = parseOptionalJSON(value, field, t);
+  if (parsed === undefined) return undefined;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(t('invalidJsonObject', { field }));
+  }
+  return parsed as Record<string, string>;
+}
+
+function parseOptionalJSONArray<T>(value: string, field: string, t: TFunction): T[] | undefined {
+  const parsed = parseOptionalJSON(value, field, t);
+  if (parsed === undefined) return undefined;
+  if (!Array.isArray(parsed)) {
+    throw new Error(t('invalidJsonArray', { field }));
+  }
+  return parsed as T[];
 }
 
 function ConfigPage({ config }: { config?: AppConfig }) {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, MANAGEMENT_KEY_STORAGE, apiDownload, apiRequest, clearManagementKey, setManagementKey } from './api';
+import { ApiError, MANAGEMENT_KEY_STORAGE, apiDownload, apiRequest, apiUpload, clearManagementKey, setManagementKey } from './api';
 
 describe('apiRequest', () => {
   beforeEach(() => {
@@ -67,5 +67,26 @@ describe('apiRequest', () => {
     expect(blob).toBeTruthy();
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(new Headers(init.headers).get('Authorization')).toBe('Bearer download-key');
+  });
+
+  it('uses bearer token for FormData uploads without setting content type', async () => {
+    setManagementKey('upload-key');
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: 'ok' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const formData = new FormData();
+    formData.append('file', new File(['{}'], 'auth.json', { type: 'application/json' }));
+
+    await expect(apiUpload('/v0/management/auth-files', formData)).resolves.toEqual({ status: 'ok' });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = new Headers(init.headers);
+    expect(headers.get('Authorization')).toBe('Bearer upload-key');
+    expect(headers.has('Content-Type')).toBe(false);
+    expect(init.body).toBe(formData);
   });
 });

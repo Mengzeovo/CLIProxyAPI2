@@ -66,6 +66,13 @@ export async function apiDownload(path: string): Promise<Blob> {
   return response.blob();
 }
 
+export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
+  return apiRequest<T>(path, {
+    method: 'POST',
+    body: formData,
+  });
+}
+
 async function fetchWithManagementAuth(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
   const key = getManagementKey();

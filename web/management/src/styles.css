@@ -169,6 +169,17 @@ textarea:focus {
   border-radius: 7px;
 }
 
+.success-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--green);
+  background: var(--green-soft);
+  color: var(--green);
+  border-radius: 7px;
+}
+
 .primary,
 .secondary,
 .danger-button,
@@ -648,6 +659,105 @@ tbody tr:last-child td {
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid var(--border);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.modal {
+  width: min(760px, 100%);
+  max-height: min(760px, calc(100vh - 44px));
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+  overflow: hidden;
+}
+
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-head h2 {
+  margin: 0 0 5px;
+  font-size: 20px;
+}
+
+.modal-head p,
+.field-help {
+  margin: 0;
+  color: var(--muted);
+}
+
+.modal-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 18px;
+}
+
+.segmented {
+  display: flex;
+  gap: 6px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-soft);
+}
+
+.segmented.compact {
+  padding: 0;
+  margin-bottom: 14px;
+  border-bottom: 0;
+  background: transparent;
+}
+
+.segmented button {
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--muted);
+  padding: 7px 12px;
+  font-weight: 750;
+}
+
+.segmented button.active {
+  border-color: var(--blue);
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.credential-section {
+  display: grid;
+  gap: 14px;
+}
+
+.credential-section h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.checkbox-row input {
+  width: auto;
 }
 
 .config-layout,

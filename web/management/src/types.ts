@@ -63,6 +63,59 @@ export type AuthFilesResponse = {
   files: AuthFile[];
 };
 
+export type ModelAlias = {
+  name: string;
+  alias: string;
+  [key: string]: unknown;
+};
+
+export type ProviderApiKeyConfig = {
+  'api-key': string;
+  priority?: number;
+  prefix?: string;
+  'base-url'?: string;
+  'proxy-url'?: string;
+  models?: ModelAlias[];
+  headers?: Record<string, string>;
+  'excluded-models'?: string[];
+  websockets?: boolean;
+};
+
+export type OpenAICompatibilityAPIKeyEntry = {
+  'api-key': string;
+  'proxy-url'?: string;
+};
+
+export type OpenAICompatibilityConfig = {
+  name: string;
+  priority?: number;
+  disabled?: boolean;
+  prefix?: string;
+  'base-url': string;
+  'api-key-entries'?: OpenAICompatibilityAPIKeyEntry[];
+  models?: ModelAlias[];
+  headers?: Record<string, string>;
+};
+
+export type ProviderApiKeyResponse = {
+  'gemini-api-key'?: ProviderApiKeyConfig[];
+  'claude-api-key'?: ProviderApiKeyConfig[];
+  'codex-api-key'?: ProviderApiKeyConfig[];
+  'vertex-api-key'?: ProviderApiKeyConfig[];
+  'openai-compatibility'?: OpenAICompatibilityConfig[];
+};
+
+export type AuthUploadResponse = {
+  status: string;
+  uploaded?: number;
+  files?: string[];
+  failed?: Array<{ name?: string; error?: string }>;
+  'auth-file'?: string;
+  project_id?: string;
+  email?: string;
+  location?: string;
+};
+
 export type LogsResponse = {
   lines: string[];
   'line-count': number;
