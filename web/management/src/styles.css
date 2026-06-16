@@ -127,6 +127,12 @@ label {
   gap: 14px;
 }
 
+.auth-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+
 input,
 select,
 textarea {
@@ -308,6 +314,37 @@ nav button.active {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.language-select {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--muted);
+  padding: 0 8px;
+}
+
+.language-select svg {
+  flex: 0 0 auto;
+}
+
+.language-select select {
+  width: auto;
+  min-width: 86px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 0 20px 0 0;
+  box-shadow: none;
+}
+
+.language-select select:focus {
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .content {

@@ -8,6 +8,7 @@ import {
   Eye,
   FileText,
   KeyRound,
+  Languages,
   Loader2,
   Lock,
   Moon,
@@ -23,7 +24,7 @@ import {
   Unlock,
   X,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createColumnHelper, flexRender, getCoreRowModel, getFilteredRowModel, useReactTable } from '@tanstack/react-table';
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -38,6 +39,15 @@ import {
 } from './api';
 import type { ApiCallResponse, AppConfig, AuthFile, AuthFilesResponse, LogsResponse, RequestErrorLog } from './types';
 import { buildLineDiff, bytes, formatDate, maskSecret, providerOf, recentTotals, statusOf, successRate } from './utils';
+import {
+  getInitialLanguage,
+  languageOptions,
+  persistLanguage,
+  statusTranslationKey,
+  translate,
+  type Language,
+  type TranslationKey,
+} from './i18n';
 import './styles.css';
 
 const queryClient = new QueryClient({
@@ -51,13 +61,46 @@ const queryClient = new QueryClient({
 
 type View = 'overview' | 'accounts' | 'config' | 'logs' | 'playground';
 
-const navItems: Array<{ id: View; label: string; icon: typeof Activity }> = [
-  { id: 'overview', label: 'Overview', icon: Activity },
-  { id: 'accounts', label: 'Accounts', icon: KeyRound },
-  { id: 'config', label: 'Config', icon: Settings },
-  { id: 'logs', label: 'Logs', icon: FileText },
-  { id: 'playground', label: 'API Test', icon: Play },
+const navItems: Array<{ id: View; labelKey: TranslationKey; icon: typeof Activity }> = [
+  { id: 'overview', labelKey: 'navOverview', icon: Activity },
+  { id: 'accounts', labelKey: 'accounts', icon: KeyRound },
+  { id: 'config', labelKey: 'config', icon: Settings },
+  { id: 'logs', labelKey: 'logs', icon: FileText },
+  { id: 'playground', labelKey: 'navApiTest', icon: Play },
 ];
+
+type TFunction = (key: TranslationKey, params?: Record<string, string | number>) => string;
+
+type I18nContextValue = {
+  language: Language;
+  setLanguage: (language: Language) => void;
+  t: TFunction;
+};
+
+const I18nContext = createContext<I18nContextValue | null>(null);
+
+function useI18n(): I18nContextValue {
+  const value = useContext(I18nContext);
+  if (!value) {
+    throw new Error('useI18n must be used inside I18nContext.Provider');
+  }
+  return value;
+}
+
+function I18nProvider({ children }: { children: ReactNode }) {
+  const [language, setLanguage] = useState<Language>(getInitialLanguage);
+  const t = useCallback<TFunction>((key, params) => translate(language, key, params), [language]);
+
+  useEffect(() => {
+    persistLanguage(language);
+    document.documentElement.lang = language;
+    document.title = t('appTitle');
+  }, [language, t]);
+
+  const value = useMemo(() => ({ language, setLanguage, t }), [language, t]);
+
+  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+}
 
 async function downloadManagementFile(path: string, filename: string) {
   const blob = await apiDownload(path);
@@ -73,9 +116,11 @@ async function downloadManagementFile(path: string, filename: string) {
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <ManagementApp />
-    </QueryClientProvider>
+    <I18nProvider>
+      <QueryClientProvider client={queryClient}>
+        <ManagementApp />
+      </QueryClientProvider>
+    </I18nProvider>
   );
 }
 
@@ -94,7 +139,25 @@ function ManagementApp() {
   return <ConsoleShell onLock={() => setLocked(true)} />;
 }
 
+function LanguageSelect() {
+  const { language, setLanguage, t } = useI18n();
+
+  return (
+    <div className="language-select" title={t('languageSelect')}>
+      <Languages size={15} />
+      <select aria-label={t('language')} value={language} onChange={(event) => setLanguage(event.target.value as Language)}>
+        {languageOptions.map((option) => (
+          <option value={option.value} key={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 function AuthGate({ onUnlock }: { onUnlock: () => void }) {
+  const { t } = useI18n();
   const [key, setKey] = useState('');
   const [error, setError] = useState('');
   const testKey = useMutation({
@@ -108,30 +171,33 @@ function AuthGate({ onUnlock }: { onUnlock: () => void }) {
     },
     onError: (err) => {
       clearManagementKey();
-      setError(err instanceof Error ? err.message : 'Unable to unlock management API');
+      setError(err instanceof Error ? err.message : t('unableToUnlock'));
     },
   });
 
   return (
     <main className="auth-screen">
       <section className="auth-panel">
+        <div className="auth-actions">
+          <LanguageSelect />
+        </div>
         <div className="auth-mark">
           <Shield size={28} />
         </div>
-        <h1>CLIProxyAPI Management</h1>
-        <p>Enter the management key for this browser session.</p>
+        <h1>{t('appTitle')}</h1>
+        <p>{t('managementKeyHelp')}</p>
         <form
           onSubmit={(event) => {
             event.preventDefault();
             if (!key.trim()) {
-              setError('Management key is required');
+              setError(t('managementKeyRequired'));
               return;
             }
             testKey.mutate();
           }}
         >
           <input name="username" type="hidden" autoComplete="username" value="management" readOnly />
-          <label htmlFor="management-key">Management key</label>
+          <label htmlFor="management-key">{t('managementKey')}</label>
           <input
             id="management-key"
             type="password"
@@ -143,7 +209,7 @@ function AuthGate({ onUnlock }: { onUnlock: () => void }) {
           {error ? <div className="form-error">{error}</div> : null}
           <button className="primary full" type="submit" disabled={testKey.isPending}>
             {testKey.isPending ? <Loader2 className="spin" size={16} /> : <Unlock size={16} />}
-            Unlock
+            {t('unlock')}
           </button>
         </form>
       </section>
@@ -152,6 +218,7 @@ function AuthGate({ onUnlock }: { onUnlock: () => void }) {
 }
 
 function ConsoleShell({ onLock }: { onLock: () => void }) {
+  const { t } = useI18n();
   const [view, setView] = useState<View>('overview');
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
   const [selectedAuth, setSelectedAuth] = useState<AuthFile | null>(null);
@@ -176,6 +243,7 @@ function ConsoleShell({ onLock }: { onLock: () => void }) {
 
   const accounts = authFiles.data?.files || [];
   const activeView = navItems.find((item) => item.id === view);
+  const activeViewLabel = activeView ? t(activeView.labelKey) : '';
 
   return (
     <div className="app-shell">
@@ -184,7 +252,7 @@ function ConsoleShell({ onLock }: { onLock: () => void }) {
           <div className="brand-icon">CP</div>
           <div>
             <strong>CLIProxyAPI</strong>
-            <span>Management</span>
+            <span>{t('management')}</span>
           </div>
         </div>
         <nav>
@@ -193,7 +261,7 @@ function ConsoleShell({ onLock }: { onLock: () => void }) {
             return (
               <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}>
                 <Icon size={17} />
-                {item.label}
+                {t(item.labelKey)}
               </button>
             );
           })}
@@ -207,7 +275,7 @@ function ConsoleShell({ onLock }: { onLock: () => void }) {
           }}
         >
           <Lock size={16} />
-          Lock session
+          {t('lockSession')}
         </button>
       </aside>
 
@@ -215,16 +283,17 @@ function ConsoleShell({ onLock }: { onLock: () => void }) {
         <header className="topbar">
           <div>
             <div className="crumb">
-              Management <ChevronRight size={14} /> {activeView?.label}
+              {t('management')} <ChevronRight size={14} /> {activeViewLabel}
             </div>
-            <h1>{activeView?.label}</h1>
+            <h1>{activeViewLabel}</h1>
           </div>
           <div className="top-actions">
-            <StatusPill ok={health.data?.status === 'ok'} label={health.data?.status === 'ok' ? 'Service online' : 'Health pending'} />
-            <button className="icon-button" title="Refresh" onClick={() => qc.invalidateQueries()}>
+            <StatusPill ok={health.data?.status === 'ok'} label={health.data?.status === 'ok' ? t('serviceOnline') : t('healthPending')} />
+            <LanguageSelect />
+            <button className="icon-button" title={t('refresh')} onClick={() => qc.invalidateQueries()}>
               <RefreshCcw size={17} />
             </button>
-            <button className="icon-button" title="Toggle theme" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
+            <button className="icon-button" title={t('themeToggle')} onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
               {theme === 'light' ? <Moon size={17} /> : <Sun size={17} />}
             </button>
           </div>
@@ -256,6 +325,7 @@ function StatusPill({ ok, label }: { ok: boolean; label: string }) {
 }
 
 function Overview({ config, accounts, usageRecords, loading }: { config?: AppConfig; accounts: AuthFile[]; usageRecords: unknown[]; loading: boolean }) {
+  const { t } = useI18n();
   const byProvider = useMemo(() => {
     const groups = new Map<string, AuthFile[]>();
     for (const auth of accounts) {
@@ -271,28 +341,28 @@ function Overview({ config, accounts, usageRecords, loading }: { config?: AppCon
   return (
     <div className="page-grid">
       <div className="metric-row">
-        <Metric icon={Server} label="Service" value={loading ? 'Loading' : 'Online'} tone="green" />
-        <Metric icon={KeyRound} label="Accounts" value={`${enabled}/${accounts.length}`} detail="enabled / total" tone="blue" />
-        <Metric icon={AlertTriangle} label="Unavailable" value={String(unavailable)} tone={unavailable > 0 ? 'red' : 'green'} />
-        <Metric icon={Activity} label="Recent records" value={String(usageRecords.length)} tone="amber" />
+        <Metric icon={Server} label={t('service')} value={loading ? t('loading') : t('online')} tone="green" />
+        <Metric icon={KeyRound} label={t('accounts')} value={`${enabled}/${accounts.length}`} detail={t('enabledTotal')} tone="blue" />
+        <Metric icon={AlertTriangle} label={t('unavailable')} value={String(unavailable)} tone={unavailable > 0 ? 'red' : 'green'} />
+        <Metric icon={Activity} label={t('recentRecords')} value={String(usageRecords.length)} tone="amber" />
       </div>
 
       <section className="panel wide">
         <div className="panel-heading">
           <div>
-            <h2>Provider Health Matrix</h2>
-            <p>Account availability and recent request success by provider.</p>
+            <h2>{t('providerHealthMatrix')}</h2>
+            <p>{t('providerHealthMatrixHelp')}</p>
           </div>
         </div>
         <div className="matrix">
           <div className="matrix-head">
-            <span>Provider</span>
-            <span>Total</span>
-            <span>Enabled</span>
-            <span>Unavailable</span>
-            <span>Success</span>
+            <span>{t('provider')}</span>
+            <span>{t('total')}</span>
+            <span>{t('enabled')}</span>
+            <span>{t('unavailable')}</span>
+            <span>{t('success')}</span>
           </div>
-          {byProvider.length === 0 ? <EmptyState icon={KeyRound} title="No accounts found" /> : null}
+          {byProvider.length === 0 ? <EmptyState icon={KeyRound} title={t('noAccountsFound')} /> : null}
           {byProvider.map(([provider, providerAccounts]) => {
             const disabled = providerAccounts.filter((auth) => auth.disabled).length;
             const failed = providerAccounts.filter((auth) => auth.unavailable || statusOf(auth) === 'failed').length;
@@ -310,23 +380,23 @@ function Overview({ config, accounts, usageRecords, loading }: { config?: AppCon
       </section>
 
       <section className="panel">
-        <h2>Configuration</h2>
+        <h2>{t('configuration')}</h2>
         <div className="kv-list">
-          <KV label="Debug" value={String(Boolean(config?.debug))} />
-          <KV label="Logging to file" value={String(Boolean(config?.['logging-to-file']))} />
-          <KV label="Request log" value={String(Boolean(config?.['request-log']))} />
-          <KV label="Proxy URL" value={config?.['proxy-url'] ? 'configured' : 'direct'} />
-          <KV label="Routing" value={config?.routing?.strategy || 'round-robin'} />
-          <KV label="Retry" value={String(config?.['request-retry'] ?? 0)} />
+          <KV label={t('debug')} value={t(Boolean(config?.debug) ? 'yes' : 'no')} />
+          <KV label={t('loggingToFile')} value={t(Boolean(config?.['logging-to-file']) ? 'yes' : 'no')} />
+          <KV label={t('requestLog')} value={t(Boolean(config?.['request-log']) ? 'yes' : 'no')} />
+          <KV label={t('proxyUrl')} value={config?.['proxy-url'] ? t('configured') : t('direct')} />
+          <KV label={t('routing')} value={config?.routing?.strategy || 'round-robin'} />
+          <KV label={t('retry')} value={String(config?.['request-retry'] ?? 0)} />
         </div>
       </section>
 
       <section className="panel">
-        <h2>Management API</h2>
+        <h2>{t('managementApi')}</h2>
         <div className="kv-list">
-          <KV label="Panel mode" value={config?.['remote-management']?.['panel-mode'] || 'builtin'} />
-          <KV label="Remote access" value={String(Boolean(config?.['remote-management']?.['allow-remote']))} />
-          <KV label="Control panel" value={config?.['remote-management']?.['disable-control-panel'] ? 'disabled' : 'enabled'} />
+          <KV label={t('panelMode')} value={config?.['remote-management']?.['panel-mode'] || 'builtin'} />
+          <KV label={t('remoteAccess')} value={t(Boolean(config?.['remote-management']?.['allow-remote']) ? 'yes' : 'no')} />
+          <KV label={t('controlPanel')} value={config?.['remote-management']?.['disable-control-panel'] ? t('disabled') : t('enabled')} />
         </div>
       </section>
     </div>
@@ -354,6 +424,7 @@ function KV({ label, value }: { label: string; value: string }) {
 }
 
 function Accounts({ accounts, loading, onSelect }: { accounts: AuthFile[]; loading: boolean; onSelect: (auth: AuthFile) => void }) {
+  const { t } = useI18n();
   const [globalFilter, setGlobalFilter] = useState('');
   const [providerFilter, setProviderFilter] = useState('all');
   const qc = useQueryClient();
@@ -376,16 +447,17 @@ function Accounts({ accounts, loading, onSelect }: { accounts: AuthFile[]; loadi
   });
 
   const column = createColumnHelper<AuthFile>();
+  const formatStatus = useCallback((status: string) => t(statusTranslationKey(status)), [t]);
   const columns = useMemo(
     () => [
       column.accessor((row) => providerOf(row), {
         id: 'provider',
-        header: 'Provider',
+        header: t('provider'),
         cell: (ctx) => <span className="chip neutral mono">{ctx.getValue()}</span>,
       }),
       column.accessor((row) => row.label || row.email || row.name || row.id || '-', {
         id: 'account',
-        header: 'Account',
+        header: t('account'),
         cell: (ctx) => (
           <button className="link-cell" onClick={() => onSelect(ctx.row.original)}>
             {ctx.getValue()}
@@ -394,17 +466,17 @@ function Accounts({ accounts, loading, onSelect }: { accounts: AuthFile[]; loadi
       }),
       column.accessor((row) => statusOf(row), {
         id: 'status',
-        header: 'Status',
-        cell: (ctx) => <span className={`chip ${ctx.getValue()}`}>{ctx.getValue()}</span>,
+        header: t('status'),
+        cell: (ctx) => <span className={`chip ${ctx.getValue()}`}>{formatStatus(ctx.getValue())}</span>,
       }),
       column.accessor((row) => row.auth_index || row.id || '', {
         id: 'auth',
-        header: 'Auth index',
+        header: t('authIndex'),
         cell: (ctx) => <span className="mono">{maskSecret(ctx.getValue())}</span>,
       }),
       column.accessor((row) => recentTotals(row.recent_requests), {
         id: 'recent',
-        header: 'Recent',
+        header: t('recent'),
         cell: (ctx) => {
           const value = ctx.getValue();
           return (
@@ -425,7 +497,7 @@ function Accounts({ accounts, loading, onSelect }: { accounts: AuthFile[]; loadi
             <div className="row-actions">
               <button
                 className="icon-button small"
-                title={auth.disabled ? 'Enable' : 'Disable'}
+                title={auth.disabled ? t('enable') : t('disable')}
                 onClick={() => statusMutation.mutate({ auth, disabled: !auth.disabled })}
               >
                 {auth.disabled ? <Unlock size={15} /> : <Lock size={15} />}
@@ -433,7 +505,7 @@ function Accounts({ accounts, loading, onSelect }: { accounts: AuthFile[]; loadi
               {auth.name ? (
                 <button
                   className="icon-button small"
-                  title="Download"
+                  title={t('download')}
                   onClick={() => void downloadManagementFile(`/v0/management/auth-files/download?name=${encodeURIComponent(auth.name || '')}`, auth.name || 'auth.json')}
                 >
                   <Download size={15} />
@@ -441,9 +513,9 @@ function Accounts({ accounts, loading, onSelect }: { accounts: AuthFile[]; loadi
               ) : null}
               <button
                 className="icon-button small danger"
-                title="Delete"
+                title={t('delete')}
                 onClick={() => {
-                  if (confirm(`Delete ${auth.name || auth.id}?`)) deleteMutation.mutate(auth);
+                  if (confirm(t('deleteConfirm', { name: auth.name || auth.id || '-' }))) deleteMutation.mutate(auth);
                 }}
               >
                 <Trash2 size={15} />
@@ -453,7 +525,7 @@ function Accounts({ accounts, loading, onSelect }: { accounts: AuthFile[]; loadi
         },
       }),
     ],
-    [column, deleteMutation, onSelect, statusMutation],
+    [column, deleteMutation, formatStatus, onSelect, statusMutation, t],
   );
 
   const table = useReactTable({
@@ -470,12 +542,12 @@ function Accounts({ accounts, loading, onSelect }: { accounts: AuthFile[]; loadi
       <div className="toolbar">
         <div className="search-box">
           <Search size={16} />
-          <input value={globalFilter} onChange={(event) => setGlobalFilter(event.target.value)} placeholder="Search accounts, providers, auth index" />
+          <input value={globalFilter} onChange={(event) => setGlobalFilter(event.target.value)} placeholder={t('searchAccounts')} />
         </div>
         <select value={providerFilter} onChange={(event) => setProviderFilter(event.target.value)}>
           {providers.map((provider) => (
             <option value={provider} key={provider}>
-              {provider}
+              {provider === 'all' ? t('all') : provider}
             </option>
           ))}
         </select>
@@ -495,14 +567,14 @@ function Accounts({ accounts, loading, onSelect }: { accounts: AuthFile[]; loadi
             {loading ? (
               <tr>
                 <td colSpan={columns.length}>
-                  <EmptyState icon={Loader2} title="Loading accounts" spin />
+                  <EmptyState icon={Loader2} title={t('loadingAccounts')} spin />
                 </td>
               </tr>
             ) : null}
             {!loading && table.getRowModel().rows.length === 0 ? (
               <tr>
                 <td colSpan={columns.length}>
-                  <EmptyState icon={KeyRound} title="No accounts match the current filter" />
+                  <EmptyState icon={KeyRound} title={t('noAccountsFilter')} />
                 </td>
               </tr>
             ) : null}
@@ -547,6 +619,7 @@ function OAuthActions() {
 }
 
 function ConfigPage({ config }: { config?: AppConfig }) {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const yamlQuery = useQuery({ queryKey: ['config-yaml'], queryFn: () => managementApi.get<string>('/config.yaml') });
   const [draft, setDraft] = useState('');
@@ -568,30 +641,30 @@ function ConfigPage({ config }: { config?: AppConfig }) {
   return (
     <div className="config-layout">
       <section className="panel">
-        <h2>Common Settings</h2>
+        <h2>{t('commonSettings')}</h2>
         <div className="settings-list">
-          <ReadOnlyToggle label="Debug" checked={Boolean(config?.debug)} />
-          <ReadOnlyToggle label="Logging to file" checked={Boolean(config?.['logging-to-file'])} />
-          <ReadOnlyToggle label="Request log" checked={Boolean(config?.['request-log'])} />
-          <ReadOnlyField label="Proxy URL" value={config?.['proxy-url'] || 'direct'} />
-          <ReadOnlyField label="Routing strategy" value={config?.routing?.strategy || 'round-robin'} />
-          <ReadOnlyField label="Request retry" value={String(config?.['request-retry'] ?? 0)} />
+          <ReadOnlyToggle label={t('debug')} checked={Boolean(config?.debug)} />
+          <ReadOnlyToggle label={t('loggingToFile')} checked={Boolean(config?.['logging-to-file'])} />
+          <ReadOnlyToggle label={t('requestLog')} checked={Boolean(config?.['request-log'])} />
+          <ReadOnlyField label={t('proxyUrl')} value={config?.['proxy-url'] || t('direct')} />
+          <ReadOnlyField label={t('routingStrategy')} value={config?.routing?.strategy || 'round-robin'} />
+          <ReadOnlyField label={t('requestRetry')} value={String(config?.['request-retry'] ?? 0)} />
         </div>
       </section>
       <section className="panel editor-panel">
         <div className="panel-heading">
           <div>
-            <h2>Advanced YAML</h2>
-            <p>Edit the raw config file. Save validates through the server first.</p>
+            <h2>{t('advancedYaml')}</h2>
+            <p>{t('advancedYamlHelp')}</p>
           </div>
           <div className="row-actions">
             <button className="secondary" onClick={() => setShowDiff(!showDiff)}>
               <Eye size={15} />
-              Diff
+              {t('diff')}
             </button>
             <button className="primary" disabled={saveYaml.isPending || draft === yamlQuery.data} onClick={() => saveYaml.mutate()}>
               {saveYaml.isPending ? <Loader2 className="spin" size={15} /> : <Save size={15} />}
-              Save
+              {t('save')}
             </button>
           </div>
         </div>
@@ -631,6 +704,7 @@ function ReadOnlyField({ label, value }: { label: string; value: string }) {
 }
 
 function LogsPage({ config }: { config?: AppConfig }) {
+  const { t } = useI18n();
   const [after, setAfter] = useState(0);
   const [filter, setFilter] = useState('');
   const qc = useQueryClient();
@@ -664,23 +738,23 @@ function LogsPage({ config }: { config?: AppConfig }) {
         <div className="toolbar">
           <div className="search-box">
             <Search size={16} />
-            <input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Filter logs" />
+            <input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={t('filterLogs')} />
           </div>
           <button className="secondary" onClick={() => logs.refetch()}>
             <RefreshCcw size={15} />
-            Refresh
+            {t('refresh')}
           </button>
-          <button className="danger-button" onClick={() => confirm('Clear all log files?') && clearLogs.mutate()} disabled={!config?.['logging-to-file']}>
+          <button className="danger-button" onClick={() => confirm(t('clearAllLogFiles')) && clearLogs.mutate()} disabled={!config?.['logging-to-file']}>
             <Trash2 size={15} />
-            Clear
+            {t('clear')}
           </button>
         </div>
-        {!config?.['logging-to-file'] ? <EmptyState icon={FileText} title="File logging is disabled" /> : null}
+        {!config?.['logging-to-file'] ? <EmptyState icon={FileText} title={t('fileLoggingDisabled')} /> : null}
         {logs.error ? <ApiErrorBox error={logs.error} /> : null}
-        <pre className="log-lines">{lines.length ? lines.join('\n') : 'No log lines loaded.'}</pre>
+        <pre className="log-lines">{lines.length ? lines.join('\n') : t('noLogLines')}</pre>
       </section>
       <section className="panel">
-        <h2>Request Error Logs</h2>
+        <h2>{t('requestErrorLogs')}</h2>
         <div className="error-file-list">
           {(requestErrorLogs.data?.files || []).map((file) => (
             <button
@@ -694,7 +768,7 @@ function LogsPage({ config }: { config?: AppConfig }) {
               </small>
             </button>
           ))}
-          {(requestErrorLogs.data?.files || []).length === 0 ? <EmptyState icon={FileText} title="No request error logs" /> : null}
+          {(requestErrorLogs.data?.files || []).length === 0 ? <EmptyState icon={FileText} title={t('noRequestErrorLogs')} /> : null}
         </div>
       </section>
     </div>
@@ -702,6 +776,7 @@ function LogsPage({ config }: { config?: AppConfig }) {
 }
 
 function Playground({ accounts }: { accounts: AuthFile[] }) {
+  const { t } = useI18n();
   const [authIndex, setAuthIndex] = useState('');
   const [method, setMethod] = useState('GET');
   const [url, setUrl] = useState('https://api.openai.com/v1/models');
@@ -726,12 +801,12 @@ function Playground({ accounts }: { accounts: AuthFile[] }) {
   return (
     <div className="playground-layout">
       <section className="panel">
-        <h2>Request</h2>
+        <h2>{t('request')}</h2>
         <div className="form-grid">
           <label>
-            Auth
+            {t('auth')}
             <select value={authIndex} onChange={(event) => setAuthIndex(event.target.value)}>
-              <option value="">No credential substitution</option>
+              <option value="">{t('noCredentialSubstitution')}</option>
               {accounts.map((auth) => (
                 <option key={auth.auth_index || auth.id || auth.name} value={auth.auth_index || ''}>
                   {providerOf(auth)} · {auth.label || auth.email || auth.name || auth.id}
@@ -740,7 +815,7 @@ function Playground({ accounts }: { accounts: AuthFile[] }) {
             </select>
           </label>
           <label>
-            Method
+            {t('method')}
             <select value={method} onChange={(event) => setMethod(event.target.value)}>
               {['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((item) => (
                 <option key={item}>{item}</option>
@@ -748,26 +823,26 @@ function Playground({ accounts }: { accounts: AuthFile[] }) {
             </select>
           </label>
           <label className="span-2">
-            URL
+            {t('url')}
             <input value={url} onChange={(event) => setUrl(event.target.value)} />
           </label>
           <label className="span-2">
-            Headers JSON
+            {t('headersJson')}
             <textarea value={headers} onChange={(event) => setHeaders(event.target.value)} spellCheck={false} />
           </label>
           <label className="span-2">
-            Body
+            {t('body')}
             <textarea value={body} onChange={(event) => setBody(event.target.value)} spellCheck={false} />
           </label>
         </div>
         {call.error ? <ApiErrorBox error={call.error} /> : null}
         <button className="primary" onClick={() => call.mutate()} disabled={call.isPending}>
           {call.isPending ? <Loader2 className="spin" size={15} /> : <Play size={15} />}
-          Send request
+          {t('sendRequest')}
         </button>
       </section>
       <section className="panel result-panel">
-        <h2>Response</h2>
+        <h2>{t('response')}</h2>
         {result ? (
           <>
             <div className="response-status">
@@ -776,7 +851,7 @@ function Playground({ accounts }: { accounts: AuthFile[] }) {
             <pre>{result.body || JSON.stringify(result.header, null, 2)}</pre>
           </>
         ) : (
-          <EmptyState icon={Code2} title="No request sent yet" />
+          <EmptyState icon={Code2} title={t('noRequestSent')} />
         )}
       </section>
     </div>
@@ -784,11 +859,14 @@ function Playground({ accounts }: { accounts: AuthFile[] }) {
 }
 
 function AccountDrawer({ auth, onClose }: { auth: AuthFile | null; onClose: () => void }) {
+  const { t } = useI18n();
+  const status = auth ? statusOf(auth) : '';
+
   return (
     <aside className={`drawer ${auth ? 'open' : ''}`}>
       <div className="drawer-head">
         <div>
-          <h2>{auth?.label || auth?.email || auth?.name || 'Account'}</h2>
+          <h2>{auth?.label || auth?.email || auth?.name || t('account')}</h2>
           <span className="mono">{auth ? providerOf(auth) : ''}</span>
         </div>
         <button className="icon-button" onClick={onClose}>
@@ -797,16 +875,16 @@ function AccountDrawer({ auth, onClose }: { auth: AuthFile | null; onClose: () =
       </div>
       {auth ? (
         <div className="drawer-body">
-          <KV label="Status" value={statusOf(auth)} />
-          <KV label="Auth index" value={maskSecret(auth.auth_index || auth.id)} />
-          <KV label="Email" value={auth.email || '-'} />
-          <KV label="Project" value={auth.project_id || '-'} />
-          <KV label="Source" value={auth.source || '-'} />
-          <KV label="Path" value={auth.path ? maskSecret(auth.path) : '-'} />
-          <KV label="Updated" value={formatDate(auth.updated_at || auth.modtime)} />
-          <KV label="Last refresh" value={formatDate(auth.last_refresh)} />
-          <KV label="Success" value={String(auth.success ?? 0)} />
-          <KV label="Failed" value={String(auth.failed ?? 0)} />
+          <KV label={t('status')} value={t(statusTranslationKey(status))} />
+          <KV label={t('authIndex')} value={maskSecret(auth.auth_index || auth.id)} />
+          <KV label={t('email')} value={auth.email || '-'} />
+          <KV label={t('project')} value={auth.project_id || '-'} />
+          <KV label={t('source')} value={auth.source || '-'} />
+          <KV label={t('path')} value={auth.path ? maskSecret(auth.path) : '-'} />
+          <KV label={t('updated')} value={formatDate(auth.updated_at || auth.modtime)} />
+          <KV label={t('lastRefresh')} value={formatDate(auth.last_refresh)} />
+          <KV label={t('success')} value={String(auth.success ?? 0)} />
+          <KV label={t('failed')} value={String(auth.failed ?? 0)} />
           <pre>{JSON.stringify(auth.id_token || {}, null, 2)}</pre>
         </div>
       ) : null}
@@ -824,7 +902,8 @@ function EmptyState({ icon: Icon, title, spin }: { icon: typeof Activity; title:
 }
 
 function ApiErrorBox({ error }: { error: unknown }) {
-  const message = error instanceof ApiError || error instanceof Error ? error.message : 'Request failed';
+  const { t } = useI18n();
+  const message = error instanceof ApiError || error instanceof Error ? error.message : t('apiRequestFailed');
   return (
     <div className="api-error">
       <AlertTriangle size={16} />
