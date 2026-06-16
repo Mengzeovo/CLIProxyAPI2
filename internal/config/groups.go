@@ -72,7 +72,10 @@ func NormalizeGroupName(name string) string {
 // than route requests against a malformed group set. Duplicate names and unknown
 // provider types are rejected.
 func (cfg *Config) SanitizeGroups() error {
-	if cfg == nil || len(cfg.Groups) == 0 {
+	if cfg == nil {
+		return nil
+	}
+	if len(cfg.Groups) == 0 {
 		cfg.Groups = nil
 		return nil
 	}
@@ -147,7 +150,10 @@ func NormalizeGroupRefs(groups []string) []string {
 // file names or IDs; values are group names. Entries whose group does not exist are
 // dropped with no error (the account simply falls back to the unrestricted pool).
 func (cfg *Config) SanitizeOAuthGroups() {
-	if cfg == nil || len(cfg.OAuthGroups) == 0 {
+	if cfg == nil {
+		return
+	}
+	if len(cfg.OAuthGroups) == 0 {
 		cfg.OAuthGroups = nil
 		return
 	}
@@ -171,7 +177,10 @@ func (cfg *Config) SanitizeOAuthGroups() {
 // downstream API keys; values are the groups they may reach. Empty group lists are
 // dropped.
 func (cfg *Config) SanitizeAPIKeyGroups() {
-	if cfg == nil || len(cfg.APIKeyGroups) == 0 {
+	if cfg == nil {
+		return
+	}
+	if len(cfg.APIKeyGroups) == 0 {
 		cfg.APIKeyGroups = nil
 		return
 	}

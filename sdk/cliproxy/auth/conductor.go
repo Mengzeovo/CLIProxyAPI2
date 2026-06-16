@@ -3593,6 +3593,12 @@ func (m *Manager) pickNextLegacy(ctx context.Context, provider, model string, op
 
 func (m *Manager) pickNext(ctx context.Context, provider, model string, opts cliproxyexecutor.Options, tried map[string]struct{}) (*Auth, ProviderExecutor, error) {
 	if m.HomeEnabled() {
+		// Home mode delegates selection to a remote control center that is not
+		// group-aware, so group isolation cannot be enforced there. Fail closed
+		// for group-restricted callers instead of silently serving the full pool.
+		if _, restricted := m.allowedGroupsForContext(ctx); restricted {
+			return nil, nil, &Error{Code: "group_routing_unsupported", Message: "group-restricted API keys are not supported in home mode", HTTPStatus: http.StatusServiceUnavailable}
+		}
 		auth, exec, _, err := m.pickNextViaHome(ctx, model, opts, tried)
 		return auth, exec, err
 	}
@@ -3769,6 +3775,11 @@ func (m *Manager) pickNextMixedLegacy(ctx context.Context, providers []string, m
 
 func (m *Manager) pickNextMixed(ctx context.Context, providers []string, model string, opts cliproxyexecutor.Options, tried map[string]struct{}) (*Auth, ProviderExecutor, string, error) {
 	if m.HomeEnabled() {
+		// See pickNext: home routing is not group-aware, so fail closed rather
+		// than leaking the full credential pool to a group-restricted caller.
+		if _, restricted := m.allowedGroupsForContext(ctx); restricted {
+			return nil, nil, "", &Error{Code: "group_routing_unsupported", Message: "group-restricted API keys are not supported in home mode", HTTPStatus: http.StatusServiceUnavailable}
+		}
 		return m.pickNextViaHome(ctx, model, opts, tried)
 	}
 

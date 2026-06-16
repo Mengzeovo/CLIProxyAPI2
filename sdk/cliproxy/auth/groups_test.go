@@ -165,3 +165,33 @@ func TestPickNextLegacy_GroupRestrictionNoMatchErrors(t *testing.T) {
 		t.Fatalf("expected auth_not_found error, got nil")
 	}
 }
+
+func TestPickNext_HomeMode_GroupRestrictedFailsClosed(t *testing.T) {
+	// When home mode is active, group isolation cannot be enforced by the local
+	// dispatcher. pickNext and pickNextMixed must fail closed rather than
+	// silently serving the unrestricted credential pool to a restricted caller.
+	manager := NewManager(nil, &RoundRobinSelector{}, nil)
+	manager.SetConfig(&internalconfig.Config{
+		Home:         internalconfig.HomeConfig{Enabled: true},
+		APIKeyGroups: map[string][]string{"sk-restricted": {"pool-1"}},
+	})
+
+	ctx := ctxWithAPIKey("sk-restricted")
+	_, _, err := manager.pickNext(ctx, "claude", "claude-sonnet-4-6", cliproxyexecutor.Options{}, map[string]struct{}{})
+	if err == nil {
+		t.Fatal("pickNext: expected error for group-restricted key in home mode, got nil")
+	}
+	errTyped, ok := err.(*Error)
+	if !ok || errTyped.Code != "group_routing_unsupported" {
+		t.Fatalf("pickNext: expected group_routing_unsupported error, got %v", err)
+	}
+
+	_, _, _, err = manager.pickNextMixed(ctx, []string{"claude"}, "claude-sonnet-4-6", cliproxyexecutor.Options{}, map[string]struct{}{})
+	if err == nil {
+		t.Fatal("pickNextMixed: expected error for group-restricted key in home mode, got nil")
+	}
+	errTyped, ok = err.(*Error)
+	if !ok || errTyped.Code != "group_routing_unsupported" {
+		t.Fatalf("pickNextMixed: expected group_routing_unsupported error, got %v", err)
+	}
+}
