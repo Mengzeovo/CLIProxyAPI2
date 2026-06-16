@@ -1,0 +1,18 @@
+[Unit]
+Description=CLIProxyAPI Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/project/CLIProxyAPI2
+ExecStart=/root/project/CLIProxyAPI2/cli-proxy-api -config config.yaml
+Restart=on-failure
+RestartSec=3
+StandardOutput=append:/root/project/CLIProxyAPI2/logs/cli-proxy-api.out
+StandardError=append:/root/project/CLIProxyAPI2/logs/cli-proxy-api.out
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
