@@ -18,6 +18,7 @@ import {
   Moon,
   Play,
   Plus,
+  Pencil,
   RefreshCcw,
   Save,
   Search,
@@ -56,7 +57,6 @@ import type {
   OpenAICompatibilityConfig,
   ProviderApiKeyConfig,
   ProviderApiKeyResponse,
-  RecentRequestBucket,
   RequestErrorLog,
 } from './types';
 import { buildLineDiff, bytes, formatDate, generateApiKey, maskSecret, mergeBuckets, providerOf, recentTotals, statusOf, successRate } from './utils';
@@ -412,13 +412,15 @@ function Overview({ config, accounts, loading }: { config?: AppConfig; accounts:
   const enabled = accounts.filter((auth) => !auth.disabled).length;
   const unavailable = accounts.filter((auth) => auth.unavailable || statusOf(auth) === 'failed').length;
 
+  // auth.success / auth.failed are lifetime totals that already include the
+  // counts surfaced in recent_requests, so we must not add recentTotals here
+  // or recent activity would be double counted.
   const totals = useMemo(
     () =>
       accounts.reduce<{ success: number; failed: number }>(
         (acc, auth) => {
-          const recent = recentTotals(auth.recent_requests);
-          acc.success += Number(auth.success ?? 0) + recent.success;
-          acc.failed += Number(auth.failed ?? 0) + recent.failed;
+          acc.success += Number(auth.success ?? 0);
+          acc.failed += Number(auth.failed ?? 0);
           return acc;
         },
         { success: 0, failed: 0 },
@@ -1378,11 +1380,14 @@ function ApiKeyRow({
     setDraft(value);
   }, [value]);
 
+  useEffect(() => {
+    if (!copied) return;
+    const id = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(id);
+  }, [copied]);
+
   const copy = useCallback(() => {
-    void navigator.clipboard?.writeText(value).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
+    void navigator.clipboard?.writeText(value).then(() => setCopied(true));
   }, [value]);
 
   return (
@@ -1426,7 +1431,7 @@ function ApiKeyRow({
               {copied ? <CheckCircle2 size={15} /> : <Copy size={15} />}
             </button>
             <button className="icon-button small" title={t('edit')} disabled={busy} onClick={() => setEditing(true)}>
-              <Settings size={15} />
+              <Pencil size={15} />
             </button>
             <button
               className="icon-button small danger"
@@ -1565,7 +1570,7 @@ function ApiKeys() {
         <div className="apikey-list">
           {keys.map((key, index) => (
             <ApiKeyRow
-              key={`${key}-${index}`}
+              key={index}
               value={key}
               busy={save.isPending}
               onUpdate={(next) => updateKey(index, next)}

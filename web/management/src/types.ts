@@ -63,15 +63,6 @@ export type AuthFilesResponse = {
   files: AuthFile[];
 };
 
-export type ApiKeyUsageEntry = {
-  success?: number;
-  failed?: number;
-  recent_requests?: RecentRequestBucket[];
-};
-
-// provider -> "base_url|api_key" -> usage entry
-export type ApiKeyUsageResponse = Record<string, Record<string, ApiKeyUsageEntry>>;
-
 export type ApiKeysResponse = {
   'api-keys'?: string[];
 };

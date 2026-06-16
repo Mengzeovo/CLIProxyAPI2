@@ -63,15 +63,22 @@ export function successRate(auths: AuthFile[]): number {
 
 // generateApiKey creates a random client API key prefixed with "sk-".
 // It draws bytes from the Web Crypto CSPRNG and maps them onto a base62
-// alphabet, yielding a URL-safe token. `length` is the number of random
-// characters after the prefix (default 48).
+// alphabet, yielding a URL-safe token. Bytes at or above the largest multiple
+// of the alphabet length are rejected so every character is equiprobable
+// (no modulo bias). `length` is the number of random characters after the
+// prefix (default 48).
 export function generateApiKey(length = 48): string {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  const bytes = new Uint8Array(length);
-  crypto.getRandomValues(bytes);
+  const bound = Math.floor(256 / alphabet.length) * alphabet.length;
   let token = '';
-  for (let i = 0; i < length; i += 1) {
-    token += alphabet[bytes[i] % alphabet.length];
+  while (token.length < length) {
+    const buffer = new Uint8Array(length - token.length);
+    crypto.getRandomValues(buffer);
+    for (let i = 0; i < buffer.length && token.length < length; i += 1) {
+      if (buffer[i] < bound) {
+        token += alphabet[buffer[i] % alphabet.length];
+      }
+    }
   }
   return `sk-${token}`;
 }
