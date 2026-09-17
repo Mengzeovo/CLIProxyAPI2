@@ -1,0 +1,10 @@
+{
+  "name": "CLIProxyAPI",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "cli-proxy-api",
+      "command": "bash .cursor/run-dev-server.sh"
+    }
+  ]
+}
